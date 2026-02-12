@@ -1,0 +1,56 @@
+﻿# Entorno virtual
+codigoproyecto-venv/
+venv/
+env/
+ENV/
+.venv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Datos sensibles y temporales
+*.log
+.env
+*.tmp
+*.bak
+*.cache
+
+# Archivos de sistema
+Thumbs.db
+desktop.ini
+
+# Archivos grandes de datos (opcional)
+# *.csv
+# *.xlsx
