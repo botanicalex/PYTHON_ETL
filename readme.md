@@ -88,9 +88,9 @@ El notebook incluye:
 
 ## Autor
 
-**Alexa Vasco Lopera**  
+**Alexandra Vasco Lopera**  
 - GitHub: [@botanicalex](https://github.com/botanicalex)
-- Email: alexavascolopera@hotmail.com
+- Email: alexavascolopera@gmail.com
 
 ## Licencia
 
