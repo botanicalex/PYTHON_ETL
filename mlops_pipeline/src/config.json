@@ -1,0 +1,14 @@
+{
+    "project_code": "botanicalex",
+    "project_name": "credit_risk_mlops",
+    "username": "botanicalex",
+    "bucket": "",
+    "database": "",
+    "proyecto": "PYTHON_ETL",
+    "data_file": "Base_de_datos.xlsx",
+    "target": "Pago_atiempo",
+    "test_size": 0.2,
+    "random_state": 42,
+    "monitoring_period_days": 7,
+    "drift_threshold": 0.05
+}
