@@ -4,6 +4,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.model_selection import train_test_split
 
 
 # 1. Transformadores Personalizados
@@ -56,6 +57,11 @@ class Imputacion(BaseEstimator, TransformerMixin):
 
 
 class Outliers(BaseEstimator, TransformerMixin):
+    """
+    Elimina filas con outliers extremos.
+    Solo se usa en pipeline_basemodel, que se aplica sobre el df completo
+    ANTES del split — nunca dentro de CV.
+    """
     def fit(self, X, y=None):
         return self
 
@@ -148,6 +154,7 @@ class ToDF(BaseEstimator, TransformerMixin):
 
 
 # 2. Pipeline Base
+# Limpieza completa: se aplica sobre el df ANTES del split
 
 pipeline_basemodel = Pipeline(steps=[
     ("eliminar_nulos",        ColumnasNulos(cols_to_drop=["promedio_ingresos_datacredito", "tendencia_ingresos"])),
@@ -163,12 +170,15 @@ pipeline_basemodel = Pipeline(steps=[
         "saldo_principal",
         "cant_creditosvigentes",
         "saldo_mora",
-        "saldo_mora_codeudor"
+        "saldo_mora_codeudor",
     ])),
 ])
 
 
 # 3. Pipeline ML
+# FIX: ya NO incluye pipeline_basemodel adentro, porque build_feature_pipeline
+# ya lo aplicó antes del split. Así evitamos el doble preprocesamiento.
+# Solo hace escalado + encoding (ToDF) sobre datos ya limpios.
 
 numeric_features = [
     "capital_prestado", "plazo_meses", "edad_cliente", "salario_cliente",
@@ -180,24 +190,25 @@ numeric_features = [
 categorical_features = ["tipo_credito", "tipo_laboral"]
 
 pipeline_ml = Pipeline(steps=[
-    ("basemodel",    pipeline_basemodel),
     ("preprocessor", ToDF(
         numeric_features=numeric_features,
-        categorical_features=categorical_features
+        categorical_features=categorical_features,
     )),
 ])
 
 
-# 4. Función que retorna conjuntos de entrenamiento y evaluación
-
-from sklearn.model_selection import train_test_split
+# 4. build_feature_pipeline
 
 TARGET = "Pago_atiempo"
 
-def build_feature_pipeline(df, test_size=0.2, random_state=42):
+def build_feature_pipeline(df: pd.DataFrame, test_size: float = 0.2, random_state: int = 42):
     """
-    Aplica el pipeline base al DataFrame y retorna los conjuntos de
-    entrenamiento y evaluación listos para modelamiento.
+    Aplica el pipeline base al DataFrame completo, hace el split estratificado
+    y retorna los conjuntos listos para modelamiento.
+
+    pipeline_ml retornado contiene SOLO ToDF (escalado + encoding), ya que
+    pipeline_basemodel se aplicó aquí. Esto evita el doble preprocesamiento
+    en build_model.
 
     Retorna
     -------
@@ -212,7 +223,7 @@ def build_feature_pipeline(df, test_size=0.2, random_state=42):
         X, y,
         test_size=test_size,
         stratify=y,
-        random_state=random_state
+        random_state=random_state,
     )
 
     print(f"Dataset procesado: {df_clean.shape[0]} registros, {df_clean.shape[1]} columnas")
@@ -221,36 +232,34 @@ def build_feature_pipeline(df, test_size=0.2, random_state=42):
 
     return X_train, X_test, y_train, y_test, pipeline_ml
 
-if __name__ == "__main__":
-    import pandas as pd
 
+# 5. Ejecución directa
+
+if __name__ == "__main__":
     print("=" * 55)
     print("   FEATURE ENGINEERING PIPELINE – ft_engineering.py")
     print("=" * 55)
 
-    # Carga
     print("\nCargando dataset...")
     df = pd.read_excel("Base_de_datos.xlsx")
     print(f"   Filas: {df.shape[0]} | Columnas: {df.shape[1]}")
     print(f"   Nulos por columna:\n{df.isnull().sum()[df.isnull().sum() > 0].to_string()}")
 
-    # Pipeline
     print("\nAplicando pipeline base...")
     X_train, X_test, y_train, y_test, pipe_ml = build_feature_pipeline(df)
 
-    # Resultado
     print("\nConjuntos generados:")
     print(f"   X_train : {X_train.shape}")
     print(f"   X_test  : {X_test.shape}")
     print(f"   y_train : {y_train.shape}")
     print(f"   y_test  : {y_test.shape}")
 
-    print("\n Balance del target (train):")
+    print("\nBalance del target (train):")
     vc = y_train.value_counts()
     for k, v in vc.items():
         label = "Paga a tiempo" if k == 1 else "Mora"
         print(f"   {label} ({k}): {v} registros ({v/len(y_train)*100:.1f}%)")
 
-    print("\nColumnas del dataset procesado:")
+    print("\nColumnas del dataset procesado (X_train):")
     for col in X_train.columns:
         print(f"   - {col}")
