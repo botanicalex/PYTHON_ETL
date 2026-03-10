@@ -51,6 +51,8 @@ pip-wheel-metadata/
 Thumbs.db
 desktop.ini
 
-# Archivos grandes de datos (opcional)
-# *.csv
-# *.xlsx
+*.pkl
+*.png
+cargar_datos_tmp.py
+prueba.py
+=1.7.0

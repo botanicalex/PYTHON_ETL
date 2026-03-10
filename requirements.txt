@@ -22,6 +22,7 @@ statsmodels>=0.14.0
 
 # Machine Learning 
 scikit-learn>=1.2.0
+xgboost>=1.7.0
 
 # Utils
 python-dateutil>=2.8.0
