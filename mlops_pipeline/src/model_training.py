@@ -2,29 +2,34 @@ import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
+
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline as ImbPipeline
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, roc_auc_score, classification_report,
-    make_scorer,
+    make_scorer, fbeta_score,
 )
 from sklearn.model_selection import (
     StratifiedKFold, ShuffleSplit,
-    cross_validate, learning_curve, train_test_split,
+    cross_validate, learning_curve, GridSearchCV,
 )
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
+from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
 from ft_engineering import build_feature_pipeline, pipeline_ml
 
 
 # ─────────────────────────────────────────────
-# Scorers apuntando a clase 0 (mora)
-# pos_label=0 es clave dado el desbalance 95/5%
+# Scorers
+# pos_label=0 → clase mora (minoritaria, 5%)
+# fbeta_mora (beta=2): doble peso al Recall vs Precision
+#   → detectar morosos es más costoso que falsos positivos
 # ─────────────────────────────────────────────
 
 scoring_cv = {
@@ -33,6 +38,9 @@ scoring_cv = {
     "precision": make_scorer(precision_score,  pos_label=0, zero_division=0),
     "recall"   : make_scorer(recall_score,     pos_label=0, zero_division=0),
 }
+
+fbeta_mora  = make_scorer(fbeta_score, beta=2, pos_label=0, zero_division=0)
+cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 
 # ─────────────────────────────────────────────
@@ -51,99 +59,85 @@ def summarize_classification(y_test, y_pred):
 
 
 # ─────────────────────────────────────────────
-# build_model
+# STAGE 1 — build_model
+# Entrena y evalúa modelos base (sin tuning).
+# Evalúa Performance, Consistency y Scalability.
 # ─────────────────────────────────────────────
 
-def build_model(classifier_fn, data_params: dict, test_frac: float = 0.2) -> dict:
+def build_model(classifier_fn, X_train, X_test, y_train, y_test) -> dict:
     """
-    Entrena un modelo de clasificación y evalúa:
-    - Performance : métricas train/test
-    - Consistency : cross-validation (StratifiedKFold, pos_label=0)
-    - Scalability : learning curve (fit time / score time)
+    Entrena un modelo base y evalúa tres dimensiones:
+    - Performance  : métricas train/test
+    - Consistency  : StratifiedKFold CV (pos_label=0)
+    - Scalability  : learning curve (recall mora vs tamaño)
 
-    Args:
-        classifier_fn : clasificador sklearn-compatible
-        data_params   : dict con 'name_of_y_col', 'names_of_x_cols', 'dataset'
-        test_frac     : fracción de datos para test (default 0.2)
-
-    Returns:
-        dict con métricas de train y test
+    Returns dict con métricas de train, test y CV.
     """
+    model_name = classifier_fn.__class__.__name__
 
-    name_of_y_col   = data_params["name_of_y_col"]
-    names_of_x_cols = data_params["names_of_x_cols"]
-    dataset         = data_params["dataset"]
-
-    X = dataset[names_of_x_cols]
-    y = dataset[name_of_y_col]
-
-    x_train, x_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_frac, stratify=y, random_state=1234
-    )
-
-    # Pipeline completo: preprocesamiento + clasificador
+    # Pipeline: preprocesamiento + clasificador
     classifier_pipe = Pipeline(steps=[
         *clone(pipeline_ml).steps,
         ("model", classifier_fn),
     ])
-    model = classifier_pipe.fit(x_train, y_train)
 
-    y_pred       = model.predict(x_test)
-    y_pred_train = model.predict(x_train)
+    # GradientBoosting no soporta class_weight → sample_weight manual
+    if model_name == "GradientBoostingClassifier":
+        sample_w = compute_sample_weight(class_weight="balanced", y=y_train)
+        model = classifier_pipe.fit(X_train, y_train, model__sample_weight=sample_w)
+    else:
+        model = classifier_pipe.fit(X_train, y_train)
+
+    y_pred       = model.predict(X_test)
+    y_pred_train = model.predict(X_train)
 
     train_summary = summarize_classification(y_train, y_pred_train)
     test_summary  = summarize_classification(y_test,  y_pred)
 
-    model_name = model.steps[-1][1].__class__.__name__
-
     # ── Consistency: StratifiedKFold CV ───────
-    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    scores = cross_validate(
-        Pipeline(steps=[*clone(pipeline_ml).steps, ("model", clone(classifier_fn))]),
-        x_train, y_train,
-        cv=kfold,
-        scoring=scoring_cv,
-    )
-
+    cv_pipe = Pipeline(steps=[
+        *clone(pipeline_ml).steps,
+        ("model", clone(classifier_fn)),
+    ])
+    scores = cross_validate(cv_pipe, X_train, y_train, cv=cv_strategy, scoring=scoring_cv)
     cv_results_df = pd.DataFrame({
         k.replace("test_", ""): v
         for k, v in scores.items()
         if k.startswith("test_")
     })
+    cv_mean = cv_results_df.mean()
 
     print(f"\n  CV results ({model_name}) — clase mora (pos_label=0):")
-    print(cv_results_df.mean().round(4).to_string())
+    print(cv_mean.round(4).to_string())
 
     # ── Scalability: Learning Curve ────────────
-    common_params = {
-        "X"           : x_train,
-        "y"           : y_train,
-        "train_sizes" : np.linspace(0.1, 1.0, 5),
-        "cv"          : ShuffleSplit(n_splits=50, test_size=0.2, random_state=123),
-        "n_jobs"      : -1,
-        "return_times": True,
-    }
-
+    lc_pipe = Pipeline(steps=[
+        *clone(pipeline_ml).steps,
+        ("model", clone(classifier_fn)),
+    ])
     train_sizes, train_scores, test_scores, fit_times, score_times = learning_curve(
-        Pipeline(steps=[*clone(pipeline_ml).steps, ("model", clone(classifier_fn))]),
+        lc_pipe,
+        X=X_train, y=y_train,
+        train_sizes=np.linspace(0.1, 1.0, 5),
+        cv=ShuffleSplit(n_splits=50, test_size=0.2, random_state=123),
         scoring=make_scorer(recall_score, pos_label=0, zero_division=0),
-        **common_params,
+        n_jobs=-1,
+        return_times=True,
     )
 
-    train_mean       = np.mean(train_scores, axis=1)
-    train_std        = np.std(train_scores,  axis=1)
-    test_mean        = np.mean(test_scores,  axis=1)
-    test_std         = np.std(test_scores,   axis=1)
-    fit_times_mean   = np.mean(fit_times,    axis=1)
-    fit_times_std    = np.std(fit_times,     axis=1)
-    score_times_mean = np.mean(score_times,  axis=1)
-    score_times_std  = np.std(score_times,   axis=1)
+    train_mean = np.mean(train_scores, axis=1)
+    train_std  = np.std(train_scores,  axis=1)
+    test_mean  = np.mean(test_scores,  axis=1)
+    test_std   = np.std(test_scores,   axis=1)
+    fit_times_mean  = np.mean(fit_times,   axis=1)
+    fit_times_std   = np.std(fit_times,    axis=1)
+    score_times_mean = np.mean(score_times, axis=1)
+    score_times_std  = np.std(score_times,  axis=1)
 
     # Curva de aprendizaje
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(train_sizes, train_mean, "o-", label="Training score")
-    ax.plot(train_sizes, test_mean,  "o-", color="orange", label="Cross-validation score")
+    ax.plot(train_sizes, test_mean,  "o-", color="orange", label="CV score")
     ax.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, alpha=0.3)
     ax.fill_between(train_sizes, test_mean  - test_std,  test_mean  + test_std,  alpha=0.3, color="orange")
     ax.set_title(f"Learning Curve – {model_name}")
@@ -167,13 +161,117 @@ def build_model(classifier_fn, data_params: dict, test_frac: float = 0.2) -> dic
     plt.tight_layout()
     plt.show()
 
-    print("\n  Training Sizes      :", train_sizes)
-    print("  Train Recall Mean   :", train_mean.round(4))
-    print("  CV Recall Mean      :", test_mean.round(4))
-    print("  Fit Times Mean (s)  :", fit_times_mean.round(4))
-    print("  Score Times Mean (s):", score_times_mean.round(4))
+    return {
+        "train"   : train_summary,
+        "test"    : test_summary,
+        "cv_mean" : cv_mean.to_dict(),
+    }
 
-    return {"train": train_summary, "test": test_summary}
+
+# ─────────────────────────────────────────────
+# STAGE 2 — tune_model
+# SMOTE + GridSearchCV optimizando F-beta (beta=2).
+# SMOTE dentro del pipeline para evitar leakage en CV.
+# ─────────────────────────────────────────────
+
+param_grids = {
+    "Logistic Regression": {
+        "model__C"           : [0.01, 0.1, 1, 10],
+        "model__solver"      : ["saga"],
+        "model__max_iter": [2000],
+        "model__class_weight": ["balanced"],
+    },
+    "Random Forest": {
+        "model__n_estimators"    : [100, 200],
+        "model__max_depth"       : [3, 5, 10],
+        "model__min_samples_leaf": [5, 10, 20],
+        "model__class_weight"    : ["balanced"],
+    },
+    "Gradient Boosting": {
+        "model__n_estimators" : [50, 100, 200],
+        "model__max_depth"    : [2, 3, 5],
+        "model__learning_rate": [0.01, 0.05, 0.1],
+        "model__subsample"    : [0.7, 1.0],
+    },
+    "XGBoost": {
+        "model__n_estimators"    : [100, 200],
+        "model__max_depth"       : [3, 5, 7],
+        "model__learning_rate"   : [0.01, 0.05, 0.1],
+        "model__subsample"       : [0.7, 1.0],
+        "model__colsample_bytree": [0.7, 1.0],
+    },
+}
+
+
+def tune_model(nombre, clf, param_grid, X_train, X_test, y_train, y_test) -> dict:
+    """
+    Aplica SMOTE + GridSearchCV optimizando F-beta (beta=2) sobre clase mora.
+
+    Pipeline interno:
+        preprocesamiento → SMOTE → clasificador
+
+    Returns dict con métricas y el mejor estimador encontrado.
+    """
+    print(f"\n{'='*55}")
+    print(f"  Tuning: {nombre}")
+    print(f"{'='*55}")
+
+    pipe = ImbPipeline(steps=[
+        *clone(pipeline_ml).steps,
+        ("smote", SMOTE(random_state=42, k_neighbors=3)),
+        ("model", clf),
+    ])
+
+    grid_search = GridSearchCV(
+        estimator  = pipe,
+        param_grid = param_grid,
+        scoring    = fbeta_mora,
+        cv         = cv_strategy,
+        n_jobs     = -1,
+        verbose    = 1,
+        refit      = True,
+    )
+    grid_search.fit(X_train, y_train)
+
+    best_cv_score = grid_search.best_score_
+    y_pred        = grid_search.predict(X_test)
+
+    recall_t    = recall_score(y_test,    y_pred, pos_label=0, zero_division=0)
+    f1_t        = f1_score(y_test,        y_pred, pos_label=0, zero_division=0)
+    precision_t = precision_score(y_test, y_pred, pos_label=0, zero_division=0)
+    fbeta_t     = fbeta_score(y_test,     y_pred, beta=2, pos_label=0, zero_division=0)
+    roc_t       = roc_auc_score(y_test,   y_pred)
+
+    print(f"\n  Mejores hiperparámetros:")
+    for k, v in grid_search.best_params_.items():
+        print(f"    {k}: {v}")
+
+    print(f"\n  CV F-beta Mean (mejor): {best_cv_score:.4f}")
+    print(f"\n  Métricas en test:")
+    print(f"    Recall (mora)   : {recall_t:.4f}")
+    print(f"    Precision (mora): {precision_t:.4f}")
+    print(f"    F1 (mora)       : {f1_t:.4f}")
+    print(f"    F-beta (mora)   : {fbeta_t:.4f}")
+    print(f"    ROC-AUC         : {roc_t:.4f}")
+
+    print(f"\n  Reporte completo:")
+    print(classification_report(
+        y_test, y_pred,
+        target_names=["Mora", "Paga a tiempo"],
+        zero_division=0,
+    ))
+
+    return {
+        "nombre"        : nombre,
+        "best_params"   : grid_search.best_params_,
+        "CV Fbeta Mean" : round(best_cv_score, 4),
+        "Test Recall"   : round(recall_t,      4),
+        "Test Precision": round(precision_t,   4),
+        "Test F1"       : round(f1_t,          4),
+        "Test Fbeta"    : round(fbeta_t,       4),
+        "Test ROC-AUC"  : round(roc_t,         4),
+        "best_estimator": grid_search.best_estimator_,
+    }
 
 
 # ─────────────────────────────────────────────
@@ -189,18 +287,9 @@ if __name__ == "__main__":
     df = pd.read_excel("Base_de_datos.xlsx")
     X_train, X_test, y_train, y_test, _ = build_feature_pipeline(df)
 
-    # Reconstruir dataset para pasarlo a build_model
-    df_model = pd.concat([X_train, X_test])
-    df_model["Pago_atiempo"] = pd.concat([y_train, y_test])
-
-    data_params = {
-        "name_of_y_col"  : "Pago_atiempo",
-        "names_of_x_cols": X_train.columns.tolist(),
-        "dataset"        : df_model,
-    }
-
     spw = round((y_train == 1).sum() / (y_train == 0).sum(), 2)
-    print(f"scale_pos_weight (XGBoost): {spw}\n")
+    print(f"\nscale_pos_weight (XGBoost): {spw}")
+    print(f"Balance train: {y_train.value_counts(normalize=True).round(3).to_dict()}\n")
 
     modelos = {
         "Logistic Regression": LogisticRegression(
@@ -218,68 +307,148 @@ if __name__ == "__main__":
         ),
     }
 
-    # ── Entrenar y comparar ───────────────────
-    resultados = []
+    # ─────────────────────────────────────────
+    # STAGE 1 — Modelos base
+    # ─────────────────────────────────────────
+    print("\n" + "=" * 55)
+    print("   STAGE 1 — MODELOS BASE")
+    print("=" * 55)
 
+    resultados_base = []
     for nombre, clf in modelos.items():
         print(f"\n{'='*55}")
         print(f"  Modelo: {nombre}")
         print(f"{'='*55}")
-        result = build_model(clf, data_params)
-
-        resultados.append({
+        result = build_model(clf, X_train, X_test, y_train, y_test)
+        resultados_base.append({
             "Modelo"             : nombre,
-            "Train Accuracy"     : round(result["train"]["accuracy"],  4),
-            "Train F1 (mora)"    : round(result["train"]["f1_score"],  4),
-            "Train Recall (mora)": round(result["train"]["recall"],    4),
-            "Test Accuracy"      : round(result["test"]["accuracy"],   4),
-            "Test F1 (mora)"     : round(result["test"]["f1_score"],   4),
-            "Test Recall (mora)" : round(result["test"]["recall"],     4),
-            "Test ROC-AUC"       : round(result["test"]["roc_auc"],    4),
+            "Train Recall (mora)": round(result["train"]["recall"],          4),
+            "Train F1 (mora)"    : round(result["train"]["f1_score"],        4),
+            "Test Recall (mora)" : round(result["test"]["recall"],           4),
+            "Test F1 (mora)"     : round(result["test"]["f1_score"],         4),
+            "Test ROC-AUC"       : round(result["test"]["roc_auc"],          4),
+            "CV Recall Mean"     : round(result["cv_mean"].get("recall", 0), 4),
+            "CV F1 Mean"         : round(result["cv_mean"].get("f1", 0),     4),
             "Casos mora pred."   : result["test"]["casosNoPagoAtiempo"],
         })
 
-    # ── Tabla resumen ─────────────────────────
-    df_resultados = pd.DataFrame(resultados).set_index("Modelo")
-    print("\n=== TABLA RESUMEN ===")
-    print(df_resultados.to_string())
+    df_base = pd.DataFrame(resultados_base).set_index("Modelo")
+    print("\n=== TABLA RESUMEN — MODELOS BASE ===")
+    print(df_base.to_string())
 
-    # ── Gráfico comparativo ───────────────────
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    df_resultados[["Test F1 (mora)", "Test Recall (mora)", "Test ROC-AUC"]].plot(
+    # Gráfico modelos base
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    df_base[["Test F1 (mora)", "Test Recall (mora)", "Test ROC-AUC"]].plot(
         kind="bar", ax=axes[0], rot=15, colormap="coolwarm", edgecolor="white"
     )
-    axes[0].set_title("Comparación de métricas en test", fontweight="bold")
+    axes[0].set_title("Métricas en test", fontweight="bold")
     axes[0].set_ylim(0, 1)
     axes[0].spines[["top", "right"]].set_visible(False)
 
-    df_resultados[["Train F1 (mora)", "Test F1 (mora)"]].plot(
+    df_base[["Train F1 (mora)", "Test F1 (mora)"]].plot(
         kind="bar", ax=axes[1], rot=15, colormap="viridis", edgecolor="white"
     )
     axes[1].set_title("F1 mora: Train vs Test", fontweight="bold")
     axes[1].set_ylim(0, 1)
     axes[1].spines[["top", "right"]].set_visible(False)
 
+    df_base[["CV Recall Mean", "Test Recall (mora)"]].plot(
+        kind="bar", ax=axes[2], rot=15, colormap="plasma", edgecolor="white"
+    )
+    axes[2].set_title("Recall mora: CV Mean vs Test", fontweight="bold")
+    axes[2].set_ylim(0, 1)
+    axes[2].spines[["top", "right"]].set_visible(False)
+
     plt.tight_layout()
-    plt.savefig("comparacion_modelos.png", dpi=150)
+    plt.savefig("comparacion_modelos_base.png", dpi=150)
     plt.show()
-    print("\nGráfico guardado: comparacion_modelos.png")
+    print("\nGráfico guardado: comparacion_modelos_base.png")
 
-    # ── Mejor modelo y guardado ───────────────
-    mejor_nombre = df_resultados["Test F1 (mora)"].idxmax()
-    print(f"\n=== MEJOR MODELO: {mejor_nombre} ===")
+    # ─────────────────────────────────────────
+    # STAGE 2 — Tuning con SMOTE + GridSearchCV
+    # ─────────────────────────────────────────
+    print("\n" + "=" * 55)
+    print("   STAGE 2 — SMOTE + GRIDSEARCHCV (F-beta, beta=2)")
+    print("=" * 55)
 
-    mejor_pipe = Pipeline(steps=[
-        *clone(pipeline_ml).steps,
-        ("model", modelos[mejor_nombre]),
-    ])
-    mejor_pipe.fit(X_train, y_train)
+    clasificadores_tuning = {
+        "Logistic Regression": LogisticRegression(random_state=42),
+        "Random Forest"      : RandomForestClassifier(random_state=42),
+        "Gradient Boosting"  : GradientBoostingClassifier(random_state=42),
+        "XGBoost"            : XGBClassifier(eval_metric="logloss", random_state=42),
+    }
 
+    resultados_tuning = []
+    for nombre, clf in clasificadores_tuning.items():
+        resultado = tune_model(
+            nombre, clf,
+            param_grids[nombre],
+            X_train, X_test,
+            y_train, y_test,
+        )
+        resultados_tuning.append(resultado)
+
+    df_tuning = pd.DataFrame([{
+        "Modelo"        : r["nombre"],
+        "CV Fbeta Mean" : r["CV Fbeta Mean"],
+        "Test Recall"   : r["Test Recall"],
+        "Test Precision": r["Test Precision"],
+        "Test F1"       : r["Test F1"],
+        "Test Fbeta"    : r["Test Fbeta"],
+        "Test ROC-AUC"  : r["Test ROC-AUC"],
+    } for r in resultados_tuning]).set_index("Modelo")
+
+    print("\n=== TABLA RESUMEN — MODELOS CON TUNING ===")
+    print(df_tuning.to_string())
+
+    # Gráfico tuning
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    df_tuning[["CV Fbeta Mean", "Test Fbeta"]].plot(
+        kind="bar", ax=axes[0], rot=15, colormap="coolwarm", edgecolor="white"
+    )
+    axes[0].set_title("F-beta mora: CV Mean vs Test\n(SMOTE + tuning)", fontweight="bold")
+    axes[0].set_ylim(0, 1)
+    axes[0].spines[["top", "right"]].set_visible(False)
+
+    df_tuning[["Test F1", "Test Precision", "Test Recall"]].plot(
+        kind="bar", ax=axes[1], rot=15, colormap="viridis", edgecolor="white"
+    )
+    axes[1].set_title("Métricas en test\n(SMOTE + tuning)", fontweight="bold")
+    axes[1].set_ylim(0, 1)
+    axes[1].spines[["top", "right"]].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("comparacion_modelos_tuning.png", dpi=150)
+    plt.show()
+    print("\nGráfico guardado: comparacion_modelos_tuning.png")
+
+    # ─────────────────────────────────────────
+    # SELECCIÓN FINAL
+    # Criterio: mayor CV F-beta Mean (beta=2)
+    # → mejor balance Recall/Precision con más peso al Recall
+    # ─────────────────────────────────────────
+    print("\n" + "=" * 55)
+    print("   SELECCIÓN FINAL DEL MEJOR MODELO")
+    print("=" * 55)
+
+    mejor_idx    = df_tuning["CV Fbeta Mean"].idxmax()
+    mejor_result = next(r for r in resultados_tuning if r["nombre"] == mejor_idx)
+
+    print(f"\n  Mejor modelo     : {mejor_idx}")
+    print(f"  CV F-beta Mean   : {mejor_result['CV Fbeta Mean']}")
+    print(f"  Test Recall      : {mejor_result['Test Recall']}")
+    print(f"  Test Precision   : {mejor_result['Test Precision']}")
+    print(f"  Test F1          : {mejor_result['Test F1']}")
+    print(f"  Test F-beta      : {mejor_result['Test Fbeta']}")
+    print(f"  Test ROC-AUC     : {mejor_result['Test ROC-AUC']}")
+
+    print(f"\n  Reporte final en test:")
+    y_pred_final = mejor_result["best_estimator"].predict(X_test)
     print(classification_report(
-        y_test, mejor_pipe.predict(X_test),
-        target_names=["Mora", "Paga a tiempo"]
+        y_test, y_pred_final,
+        target_names=["Mora", "Paga a tiempo"],
+        zero_division=0,
     ))
 
-    joblib.dump(mejor_pipe, "mejor_modelo.pkl")
-    print("Modelo guardado: mejor_modelo.pkl")
+    joblib.dump(mejor_result["best_estimator"], "mejor_modelo.pkl")
+    print(f"\n✅ Modelo guardado: mejor_modelo.pkl ({mejor_idx})")

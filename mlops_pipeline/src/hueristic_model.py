@@ -7,20 +7,24 @@ from sklearn.metrics import classification_report, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
 
-
+# ─────────────────────────────────────────────
 # 1. Modelo Heurístico de Riesgo Crediticio
+# ─────────────────────────────────────────────
 
 class HeuristicModel(BaseEstimator, ClassifierMixin):
     """
-    Modelo basado en reglas derivadas del EDA para predecir incumplimiento de crédito.
+    Modelo baseline basado en reglas de negocio para predecir incumplimiento de crédito.
 
-    Reglas (en orden de prioridad):
+    Reglas (aplicadas en orden de prioridad mediante vectorización):
     1. Cliente con mora activa → alto riesgo (predice 0 = no paga)
     2. Puntaje Datacrédito muy bajo (< 600) → alto riesgo
     3. Cliente joven (< 30) + ratio capital/salario alto (> 3) → riesgo elevado
     4. Huella de consulta alta (> 8) + puntaje bajo (< 750) → riesgo moderado
     5. Independiente + puntaje < 700 → riesgo moderado
     6. Caso por defecto → paga a tiempo (1)
+
+    Nota: se usa vectorización con pandas en lugar de iterrows() para
+    mayor eficiencia en producción con datasets de 10.000+ registros.
     """
 
     def __init__(
@@ -47,58 +51,62 @@ class HeuristicModel(BaseEstimator, ClassifierMixin):
         return self
 
     def predict(self, X):
-        predictions = []
+        """
+        Predicción vectorizada — evita iterrows() para mayor eficiencia.
+        Las reglas se aplican de menor a mayor prioridad (la última en
+        escribir gana), por lo que la Regla 1 se aplica al final para
+        asegurar que tenga la mayor precedencia.
+        """
+        # Default: todos pagan a tiempo
+        pred = pd.Series(1, index=X.index)
 
-        for _, row in X.iterrows():
-            # Regla 1: mora activa → no paga
-            if "tiene_mora" in X.columns and row.get("tiene_mora", 0) == 1:
-                predictions.append(0)
+        # Regla 5: Independiente con puntaje bajo → mora
+        if "tipo_laboral" in X.columns and "puntaje_datacredito" in X.columns:
+            mask = (
+                (X["tipo_laboral"].astype(str) == "Independiente") &
+                (X["puntaje_datacredito"] < self.puntaje_independiente)
+            )
+            pred[mask] = 0
 
-            # Regla 2: puntaje Datacrédito muy bajo → no paga
-            elif "puntaje_datacredito" in X.columns and row.get("puntaje_datacredito", 999) < self.puntaje_muy_bajo:
-                predictions.append(0)
+        # Regla 4: Huella alta + puntaje moderado → mora
+        if "huella_consulta" in X.columns and "puntaje_datacredito" in X.columns:
+            mask = (
+                (X["huella_consulta"] > self.huella_alta) &
+                (X["puntaje_datacredito"] < self.puntaje_moderado)
+            )
+            pred[mask] = 0
 
-            # Regla 3: joven + crédito alto respecto al salario → no paga
-            elif (
-                "edad_cliente" in X.columns
-                and "ratio_capital_salario" in X.columns
-                and row.get("edad_cliente", 99) < self.edad_joven
-                and row.get("ratio_capital_salario", 0) > self.ratio_alto
-            ):
-                predictions.append(0)
+        # Regla 3: Joven + ratio capital/salario alto → mora
+        if "edad_cliente" in X.columns and "ratio_capital_salario" in X.columns:
+            mask = (
+                (X["edad_cliente"] < self.edad_joven) &
+                (X["ratio_capital_salario"] > self.ratio_alto)
+            )
+            pred[mask] = 0
 
-            # Regla 4: huella alta + puntaje moderado → no paga
-            elif (
-                "huella_consulta" in X.columns
-                and "puntaje_datacredito" in X.columns
-                and row.get("huella_consulta", 0) > self.huella_alta
-                and row.get("puntaje_datacredito", 999) < self.puntaje_moderado
-            ):
-                predictions.append(0)
+        # Regla 2: Puntaje Datacrédito muy bajo → mora
+        if "puntaje_datacredito" in X.columns:
+            pred[X["puntaje_datacredito"] < self.puntaje_muy_bajo] = 0
 
-            # Regla 5: independiente con puntaje bajo → no paga
-            elif (
-                "tipo_laboral" in X.columns
-                and "puntaje_datacredito" in X.columns
-                and str(row.get("tipo_laboral", "")) == "Independiente"
-                and row.get("puntaje_datacredito", 999) < self.puntaje_independiente
-            ):
-                predictions.append(0)
+        # Regla 1 (máxima prioridad): mora activa → mora
+        if "tiene_mora" in X.columns:
+            pred[X["tiene_mora"] == 1] = 0
 
-            # Caso por defecto: paga a tiempo
-            else:
-                predictions.append(1)
-
-        return np.array(predictions)
-
+        return pred.values
 
 
+# ─────────────────────────────────────────────
 # 2. Evaluación del modelo heurístico
-
+# ─────────────────────────────────────────────
 
 def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 10):
     """
     Evalúa el modelo heurístico con validación cruzada y curva de aprendizaje.
+
+    Evalúa tres dimensiones:
+    - Performance  : métricas en train y test
+    - Consistency  : KFold cross-validation
+    - Scalability  : curva de aprendizaje (recall vs tamaño de muestra)
 
     Retorna
     -------
@@ -121,17 +129,20 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
 
     cv_results_df = pd.DataFrame(cv_results)
 
-    # Variabilidad entre métricas
-    cv_results_df.plot.box(title="Cross Validation Boxplot – Modelo Heurístico", ylabel="Score")
+    # ── Variabilidad entre métricas ────────────
+    cv_results_df.plot.box(
+        title="Cross Validation Boxplot – Modelo Heurístico",
+        ylabel="Score"
+    )
     plt.tight_layout()
     plt.show()
 
-    # Train vs CV
+    # ── Train vs CV ───────────────────────────
     metrics_df = pd.DataFrame({
-        "Metric": scoring_metrics,
-        "Train Score": [train_results[m] for m in scoring_metrics],
-        "CV Mean":     [cv_results_df[m].mean() for m in scoring_metrics],
-        "CV Std":      [cv_results_df[m].std()  for m in scoring_metrics],
+        "Metric"      : scoring_metrics,
+        "Train Score" : [train_results[m] for m in scoring_metrics],
+        "CV Mean"     : [cv_results_df[m].mean() for m in scoring_metrics],
+        "CV Std"      : [cv_results_df[m].std()  for m in scoring_metrics],
     })
 
     metrics_df.plot(
@@ -143,7 +154,7 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     plt.tight_layout()
     plt.show()
 
-    # Matriz de confusión
+    # ── Matriz de confusión ───────────────────
     model_pipe.fit(X_train, y_train)
     y_pred = model_pipe.predict(X_test)
     print("\nReporte de clasificación – Modelo Heurístico:")
@@ -152,13 +163,13 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     plt.title("Matriz de Confusión – Modelo Heurístico")
     plt.show()
 
-    # Curva de aprendizaje (consistencia)
+    # ── Curva de aprendizaje ──────────────────
     common_params = {
-        "X": X_train,
-        "y": y_train,
-        "train_sizes": np.linspace(0.1, 1.0, 5),
-        "cv": ShuffleSplit(n_splits=50, test_size=0.2, random_state=123),
-        "n_jobs": -1,
+        "X"           : X_train,
+        "y"           : y_train,
+        "train_sizes" : np.linspace(0.1, 1.0, 5),
+        "cv"          : ShuffleSplit(n_splits=50, test_size=0.2, random_state=123),
+        "n_jobs"      : -1,
         "return_times": True,
     }
     train_sizes, train_scores, test_scores, fit_times, score_times = learning_curve(
@@ -168,10 +179,18 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(train_sizes, train_scores.mean(axis=1), "o-", label="Training score")
     ax.plot(train_sizes, test_scores.mean(axis=1), "o-", color="orange", label="CV score")
-    ax.fill_between(train_sizes, train_scores.mean(1) - train_scores.std(1),
-                    train_scores.mean(1) + train_scores.std(1), alpha=0.3)
-    ax.fill_between(train_sizes, test_scores.mean(1) - test_scores.std(1),
-                    test_scores.mean(1) + test_scores.std(1), alpha=0.3, color="orange")
+    ax.fill_between(
+        train_sizes,
+        train_scores.mean(1) - train_scores.std(1),
+        train_scores.mean(1) + train_scores.std(1),
+        alpha=0.3
+    )
+    ax.fill_between(
+        train_sizes,
+        test_scores.mean(1) - test_scores.std(1),
+        test_scores.mean(1) + test_scores.std(1),
+        alpha=0.3, color="orange"
+    )
     ax.set_title(f"Curva de Aprendizaje – {model.__class__.__name__}")
     ax.set_xlabel("Training examples")
     ax.set_ylabel("Recall")
@@ -182,24 +201,25 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     return cv_results_df, metrics_df
 
 
-
+# ─────────────────────────────────────────────
 # 3. Ejecución directa
+# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys, os
+    import sys
+    import os
     sys.path.append(os.path.dirname(__file__))
     from ft_engineering import build_feature_pipeline
-    import pandas as pd
 
     print("=" * 55)
-    print("   MODELO HEURÍSTICO – hueristic_model.py")
+    print("   MODELO HEURÍSTICO – heuristic_model.py")
     print("=" * 55)
 
     print("\nCargando y procesando datos...")
     df = pd.read_excel("Base_de_datos.xlsx")
     X_train, X_test, y_train, y_test, _ = build_feature_pipeline(df)
 
-    print("\n Entrenando modelo heurístico...")
+    print("\nEntrenando modelo heurístico...")
     model = HeuristicModel()
     print(f"   Reglas configuradas:")
     print(f"   - Puntaje muy bajo    : < {model.puntaje_muy_bajo}")
@@ -215,5 +235,9 @@ if __name__ == "__main__":
     print("\nResumen de métricas:")
     print("-" * 55)
     for _, row in metrics_df.iterrows():
-        print(f"   {row['Metric']:<12} | Train: {row['Train Score']:.3f} | CV Mean: {row['CV Mean']:.3f} ± {row['CV Std']:.3f}")
+        print(
+            f"   {row['Metric']:<12} | "
+            f"Train: {row['Train Score']:.3f} | "
+            f"CV Mean: {row['CV Mean']:.3f} ± {row['CV Std']:.3f}"
+        )
     print("=" * 55)
