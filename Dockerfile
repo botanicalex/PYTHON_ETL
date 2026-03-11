@@ -38,10 +38,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # ─────────────────────────────────────────────
-# Copiar código fuente y modelo entrenado
+# Copiar código fuente
 # ─────────────────────────────────────────────
 COPY mlops_pipeline/src/ .
-COPY mlops_pipeline/src/mejor_modelo.pkl .
 
 # ─────────────────────────────────────────────
 # Exponer puerto de la API

@@ -47,6 +47,9 @@ def detectar_data_drift(df_produccion: pd.DataFrame,
     if not cols_comunes:
         return pd.DataFrame()
 
+    if len(df_produccion) < 2:
+        return pd.DataFrame()  # muestra insuficiente para KS test (mínimo 2 registros)
+
     resultados = []
     for col in cols_comunes:
         ref_vals  = X_train[col].dropna()

@@ -106,11 +106,11 @@ def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
     try:
         service       = ModelDeploymentService(model_path=model_path)
         startup_error = None
-        print("✅ Modelo cargado correctamente.")
+        print("Modelo cargado correctamente.")
     except FileNotFoundError as e:
         service       = None
         startup_error = str(e)
-        print(f"⚠️  Modelo no encontrado: {e}")
+        print(f"Modelo no encontrado: {e}")
 
     # ── Endpoints ─────────────────────────────
 
@@ -176,7 +176,7 @@ def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
             reporte       = detectar_data_drift(df_produccion)
 
             if reporte.empty:
-                return {"status": "No se encontraron columnas numéricas comunes para analizar."}
+                return {"status": "Muestra insuficiente para análisis de drift (mínimo 2 registros)."}
 
             reporte_json = reporte.to_dict("records")
             hay_drift    = any(item["drift_detectado"] for item in reporte_json)
@@ -192,68 +192,17 @@ def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
     return app
 
 
-# ─────────────────────────────────────────────
-# 4. Generación de artefactos de imagen Docker
-# ─────────────────────────────────────────────
-
-def write_image_artifacts(base_dir: Path = Path(".")) -> Dict[str, str]:
-    """
-    Genera Dockerfile y requirements.deploy.txt en base_dir.
-    Permite reproducir la imagen de despliegue de forma programática.
-    """
-    base_dir = Path(base_dir)
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    requirements_path = base_dir / "requirements.deploy.txt"
-    dockerfile_path   = base_dir / "Dockerfile"
-
-    requirements_content = "\n".join([
-        "fastapi>=0.100.0",
-        "uvicorn[standard]>=0.22.0",
-        "pandas>=2.0.0",
-        "numpy>=1.24.0",
-        "scikit-learn>=1.2.0",
-        "xgboost>=1.7.0",
-        "imbalanced-learn>=0.12.0",
-        "joblib>=1.2.0",
-        "openpyxl>=3.1.0",
-        "scipy>=1.10.0",
-        "matplotlib>=3.7.0",
-        "seaborn>=0.12.0",
-        "pydantic>=2.0.0",
-    ])
-
-    dockerfile_content = "\n".join([
-        "FROM python:3.11-slim",
-        "WORKDIR /app",
-        "COPY requirements.deploy.txt /app/requirements.deploy.txt",
-        "RUN pip install --no-cache-dir -r /app/requirements.deploy.txt",
-        "COPY mlops_pipeline/src /app/mlops_pipeline/src",
-        "COPY mejor_modelo.pkl /app/mejor_modelo.pkl",
-        "WORKDIR /app/mlops_pipeline/src",
-        "EXPOSE 8000",
-        'CMD ["uvicorn", "model_deploy:app", "--host", "0.0.0.0", "--port", "8000"]',
-    ])
-
-    requirements_path.write_text(requirements_content, encoding="utf-8")
-    dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
-
-    print("Artefactos de imagen generados:")
-    print(f"  - requirements : {requirements_path}")
-    print(f"  - Dockerfile   : {dockerfile_path}")
-
-    return {
-        "requirements": str(requirements_path),
-        "dockerfile"  : str(dockerfile_path),
-    }
-
 
 # ─────────────────────────────────────────────
-# 5. Instancia de la app y ejecución local
+# 4. Instancia de la app y ejecución local
 # ─────────────────────────────────────────────
 
 app = create_app()
 
 if __name__ == "__main__":
-    write_image_artifacts(Path("."))
+    print("\nPara correr con Docker (desde la raiz del proyecto):")
+    print("  docker build -t modelo-mora .")
+    print("  docker run -p 8000:8000 modelo-mora")
+    print("\nAPI disponible en: http://localhost:8000")
+    print("Documentacion   : http://localhost:8000/docs\n")
     uvicorn.run("model_deploy:app", host="0.0.0.0", port=8000, reload=True)
