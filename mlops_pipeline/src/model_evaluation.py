@@ -12,17 +12,14 @@ from sklearn.metrics import (
 
 from ft_engineering import build_feature_pipeline
 
+import os
+os.makedirs("outputs", exist_ok=True)
+
 
 # ─────────────────────────────────────────────
 # evaluation()
 # Genera un dashboard de métricas del modelo desplegado.
-# Retorna un buffer PNG para ser servido por /evaluation.
-#
-# Correcciones aplicadas:
-# - y_proba usa [:, 1] (prob clase positiva) para ROC-AUC correcto
-# - roc_auc_score con y_proba[:, 1] — AUC ya no sale invertido (0.29)
-# - roc_curve y precision_recall_curve consistentes con y_proba
-# - pos_label=0 solo donde se evalúa la clase mora explícitamente
+# Retorna un buffer PNG para ser servido por el endpoint /evaluation.
 # ─────────────────────────────────────────────
 
 def evaluation() -> io.BytesIO:
@@ -31,33 +28,26 @@ def evaluation() -> io.BytesIO:
     genera un dashboard con:
     - Tabla de métricas (precision, recall, f1, roc-auc)
     - Matriz de confusión
-    - Barras de métricas clave
     - Curva ROC
     - Curva Precision-Recall
 
     Returns:
         io.BytesIO: buffer con la imagen PNG lista para servir
     """
-    # ── Cargar modelo ─────────────────────────
+    # Cargar modelo
     try:
         model = joblib.load("mejor_modelo.pkl")
     except FileNotFoundError:
         print("Error: mejor_modelo.pkl no encontrado.")
         return None
 
-    # ── Cargar datos ──────────────────────────
+    # Cargar datos
     df = pd.read_excel("Base_de_datos.xlsx")
     _, X_test, _, y_test, _ = build_feature_pipeline(df)
 
-    # ── Predicciones ──────────────────────────
+    # Predicciones
     y_pred  = model.predict(X_test)
-
-    # y_proba[:, 1] = probabilidad clase positiva (paga a tiempo)
-    # Usar [:, 1] evita el ROC-AUC invertido que ocurre con [:, 0]
-    y_proba = model.predict_proba(X_test)[:, 1]
-
-    # Probabilidad de mora para mostrar en tabla (clase 0)
-    y_proba_mora = model.predict_proba(X_test)[:, 0]
+    y_proba = model.predict_proba(X_test)[:, 1]  # probabilidad clase mora (0)
 
     # ── Métricas ──────────────────────────────
     report = classification_report(
@@ -134,9 +124,8 @@ def evaluation() -> io.BytesIO:
     ax_bar.spines[["top", "right"]].set_visible(False)
 
     # 4. Curva ROC
-    # pos_label=1 consistente con y_proba[:, 1]
     ax_roc = fig.add_subplot(gs[1, 0:2])
-    fpr, tpr, _ = roc_curve(y_test, y_proba, pos_label=1)
+    fpr, tpr, _ = roc_curve(y_test, y_proba, pos_label=0)
     ax_roc.plot(fpr, tpr, color="steelblue", lw=2,
                 label=f"ROC curve (AUC = {metricas_mora['ROC-AUC']:.4f})")
     ax_roc.plot([0, 1], [0, 1], "k--", alpha=0.4, label="Random classifier")
@@ -146,11 +135,9 @@ def evaluation() -> io.BytesIO:
     ax_roc.legend(loc="lower right")
     ax_roc.spines[["top", "right"]].set_visible(False)
 
-    # 5. Curva Precision-Recall (clase mora, pos_label=0)
+    # 5. Curva Precision-Recall
     ax_pr = fig.add_subplot(gs[1, 2])
-    precision_curve, recall_curve, _ = precision_recall_curve(
-        y_test, y_proba_mora, pos_label=0
-    )
+    precision_curve, recall_curve, _ = precision_recall_curve(y_test, y_proba, pos_label=0)
     ax_pr.plot(recall_curve, precision_curve, color="coral", lw=2)
     ax_pr.set_xlabel("Recall")
     ax_pr.set_ylabel("Precision")
@@ -163,7 +150,7 @@ def evaluation() -> io.BytesIO:
     )
     plt.tight_layout()
 
-    # ── Retornar buffer PNG ───────────────────
+    # Retornar buffer para el endpoint /evaluation
     buffer = io.BytesIO()
     plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
     buffer.seek(0)
@@ -183,6 +170,6 @@ if __name__ == "__main__":
 
     buf = evaluation()
     if buf:
-        with open("model_evaluation.png", "wb") as f:
+        with open("outputs/model_evaluation.png", "wb") as f:
             f.write(buf.getvalue())
-        print("\nGráfico guardado: model_evaluation.png")
+        print("\nGráfico guardado: outputs/model_evaluation.png")

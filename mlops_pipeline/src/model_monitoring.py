@@ -9,32 +9,12 @@ from sklearn.metrics import classification_report
 
 from ft_engineering import build_feature_pipeline
 
-
-# ─────────────────────────────────────────────
-# _cargar_referencia()
-# Carga y cachea X_train como dataset de referencia.
-# Evita recargar y reprocesar el Excel en cada llamada
-# a detectar_data_drift() o monitoreo_periodico().
-# ─────────────────────────────────────────────
-
-_referencia_cache = None
-
-def _cargar_referencia():
-    """
-    Carga X_train una sola vez y lo cachea en memoria.
-    En producción real esto vendría del DWH/Datalake.
-    """
-    global _referencia_cache
-    if _referencia_cache is None:
-        df_ref = pd.read_excel("Base_de_datos.xlsx")
-        X_train, _, _, _, _ = build_feature_pipeline(df_ref)
-        _referencia_cache = X_train
-        print("Dataset de referencia cargado y cacheado.")
-    return _referencia_cache
+import os
+os.makedirs("outputs", exist_ok=True)
 
 
 # ─────────────────────────────────────────────
-# detectar_data_drift()
+# detectar_data_drift
 # Compara distribuciones entre datos de referencia
 # y datos de producción usando el test KS.
 # ─────────────────────────────────────────────
@@ -46,7 +26,7 @@ def detectar_data_drift(df_produccion: pd.DataFrame,
     entre el dataset de referencia (train) y los datos de producción.
 
     Usa el test de Kolmogorov-Smirnov (KS):
-    - p-value < umbral → distribuciones significativamente distintas → drift
+    - p-value < umbral → las distribuciones son significativamente distintas → drift
     - p-value >= umbral → no hay evidencia de drift
 
     Args:
@@ -56,20 +36,16 @@ def detectar_data_drift(df_produccion: pd.DataFrame,
     Returns:
         DataFrame con estadístico KS, p-value y flag de drift por variable
     """
-    X_train = _cargar_referencia()
+    # Cargar datos de referencia
+    df_ref = pd.read_excel("Base_de_datos.xlsx")
+    X_train, _, _, _, _ = build_feature_pipeline(df_ref)
 
-    # Solo variables numéricas comunes entre referencia y producción
+    # Solo variables numéricas comunes
     cols_numericas = X_train.select_dtypes(include=np.number).columns.tolist()
     cols_comunes   = [c for c in cols_numericas if c in df_produccion.columns]
 
     if not cols_comunes:
         return pd.DataFrame()
-
-    # Convertir a numérico — evita error entre int y str cuando
-    # tipo_credito llega como string desde el endpoint
-    df_produccion = df_produccion.copy()
-    for col in cols_comunes:
-        df_produccion[col] = pd.to_numeric(df_produccion[col], errors="coerce")
 
     resultados = []
     for col in cols_comunes:
@@ -84,28 +60,22 @@ def detectar_data_drift(df_produccion: pd.DataFrame,
             "variable"        : col,
             "ks_statistic"    : round(stat,   4),
             "p_value"         : round(pvalue, 4),
-            "drift_detectado" : bool(pvalue < umbral_pvalue),
+            "drift_detectado" : pvalue < umbral_pvalue,
             "media_referencia": round(ref_vals.mean(),  4),
             "media_produccion": round(prod_vals.mean(), 4),
         })
 
     df_reporte = pd.DataFrame(resultados)
-    if df_reporte.empty:
-        return df_reporte
-
-    df_reporte = df_reporte.astype({
-        "ks_statistic"    : float,
-        "p_value"         : float,
-        "drift_detectado" : bool,
-        "media_referencia": float,
-        "media_produccion": float,
-    })
-
+    df_reporte["ks_statistic"]     = df_reporte["ks_statistic"].astype(float)
+    df_reporte["p_value"]          = df_reporte["p_value"].astype(float)
+    df_reporte["drift_detectado"]  = df_reporte["drift_detectado"].astype(bool)
+    df_reporte["media_referencia"] = df_reporte["media_referencia"].astype(float)
+    df_reporte["media_produccion"] = df_reporte["media_produccion"].astype(float)
     return df_reporte
 
 
 # ─────────────────────────────────────────────
-# monitoreo_periodico()
+# monitoreo_periodico
 # Simula un ciclo de monitoreo con una muestra
 # de los datos de referencia como proxy de producción.
 # En producción real se conectaría al DWH/Datalake.
@@ -115,31 +85,31 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
                         umbral_pvalue: float = 0.05) -> io.BytesIO:
     """
     Simula el monitoreo periódico del modelo:
-    1. Toma una muestra aleatoria del dataset como proxy de producción
+    1. Toma una muestra aleatoria del dataset como proxy de datos de producción
     2. Pasa la muestra por el modelo y obtiene predicciones
-    3. Detecta drift entre referencia y muestra usando test KS
-    4. Genera un reporte visual de 3 gráficos
+    3. Detecta drift entre referencia y muestra
+    4. Genera un reporte visual
 
     Args:
-        fraccion_muestra : fracción del X_test a usar como muestra (default 10%)
+        fraccion_muestra : fracción del dataset a usar como muestra (default 10%)
         umbral_pvalue    : nivel de significancia para KS test (default 0.05)
 
     Returns:
         io.BytesIO: buffer PNG con el reporte visual
     """
     # Cargar modelo y datos
-    model  = joblib.load("mejor_modelo.pkl")
-    df     = pd.read_excel("Base_de_datos.xlsx")
+    model = joblib.load("mejor_modelo.pkl")
+    df    = pd.read_excel("Base_de_datos.xlsx")
     X_train, X_test, y_train, y_test, _ = build_feature_pipeline(df)
 
-    # Muestra de producción simulada desde X_test
-    n_muestra  = max(50, int(len(X_test) * fraccion_muestra))
-    df_muestra = X_test.sample(n=n_muestra, random_state=42)
-    y_muestra  = y_test.loc[df_muestra.index]
+    # Muestra de producción (simulada)
+    n_muestra    = max(50, int(len(X_test) * fraccion_muestra))
+    df_muestra   = X_test.sample(n=n_muestra, random_state=42)
+    y_muestra    = y_test.loc[df_muestra.index]
 
     # Predicciones sobre la muestra
-    y_pred  = model.predict(df_muestra)
-    y_proba = model.predict_proba(df_muestra)[:, 0]  # prob mora
+    y_pred       = model.predict(df_muestra)
+    y_proba      = model.predict_proba(df_muestra)[:, 0]
 
     # Tabla de predicciones
     df_resultado = df_muestra.copy()
@@ -158,10 +128,8 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
     print("\n=== REPORTE DE DATA DRIFT ===")
     print(reporte_drift.to_string())
 
-    variables_con_drift = reporte_drift[
-        reporte_drift["drift_detectado"]
-    ]["variable"].tolist()
-    print(f"\nVariables con drift: {variables_con_drift if variables_con_drift else 'Ninguna'}")
+    variables_con_drift = reporte_drift[reporte_drift["drift_detectado"]].index.tolist()
+    print(f"\nVariables con drift detectado: {variables_con_drift if variables_con_drift else 'Ninguna'}")
 
     # ── Gráfico de monitoreo ──────────────────
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -177,14 +145,9 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
     axes[0].spines[["top", "right"]].set_visible(False)
 
     # 2. KS statistic por variable (top 10)
-    # Colores vectorizados — evita loop con .loc por cada variable
-    drift_plot = reporte_drift.set_index("variable")["ks_statistic"].sort_values(
-        ascending=False
-    ).head(10)
-    drift_flags = reporte_drift.set_index("variable")["drift_detectado"]
-    colores     = ["coral" if drift_flags.get(v, False) else "steelblue"
-                   for v in drift_plot.index]
-
+    drift_plot = reporte_drift.set_index("variable")["ks_statistic"].sort_values(ascending=False).head(10)
+    colores    = ["coral" if reporte_drift.set_index("variable").loc[v, "drift_detectado"] else "steelblue"
+                  for v in drift_plot.index]
     axes[1].barh(drift_plot.index, drift_plot.values, color=colores, edgecolor="white")
     axes[1].axvline(x=0.1, color="red", linestyle="--", alpha=0.5, label="Referencia 0.1")
     axes[1].set_title("KS Statistic por variable\n(rojo = drift detectado)", fontweight="bold")
@@ -193,11 +156,8 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
     axes[1].spines[["top", "right"]].set_visible(False)
 
     # 3. Comparación de medias: referencia vs producción
-    diff = (
-        reporte_drift.set_index("variable")["media_produccion"] -
-        reporte_drift.set_index("variable")["media_referencia"]
-    ).abs().sort_values(ascending=False).head(8)
-
+    diff = (reporte_drift.set_index("variable")["media_produccion"] - reporte_drift.set_index("variable")["media_referencia"]).abs()
+    diff = diff.sort_values(ascending=False).head(8)
     axes[2].barh(diff.index, diff.values, color="mediumpurple", edgecolor="white")
     axes[2].set_title("Diferencia de medias\n(referencia vs producción)", fontweight="bold")
     axes[2].set_xlabel("Diferencia absoluta")
@@ -230,6 +190,6 @@ if __name__ == "__main__":
 
     buf = monitoreo_periodico(fraccion_muestra=0.1)
     if buf:
-        with open("model_monitoring.png", "wb") as f:
+        with open("outputs/model_monitoring.png", "wb") as f:
             f.write(buf.getvalue())
-        print("\nReporte guardado: model_monitoring.png")
+        print("\nReporte guardado: outputs/model_monitoring.png")

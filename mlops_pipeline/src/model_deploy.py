@@ -1,20 +1,23 @@
+from __future__ import annotations
+
 import joblib
 import pandas as pd
 import uvicorn
 
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+
 
 # ─────────────────────────────────────────────
-# 1. Esquema de entrada
-# Columnas que produce ft_engineering (X_train.columns)
-# tipo_credito y tipo_laboral como str (no object)
+# 1. Esquema de entrada / salida
 # ─────────────────────────────────────────────
 
 class PredictionInput(BaseModel):
-    tipo_credito              : str
+    tipo_credito              : Any
     capital_prestado          : float
     plazo_meses               : float
     edad_cliente              : float
@@ -32,188 +35,225 @@ class PredictionInput(BaseModel):
 
 
 class BatchPredictionInput(BaseModel):
-    data: List[PredictionInput]
+    data: List[PredictionInput] = Field(..., min_length=1)
+
+
+class PredictionResult(BaseModel):
+    prediccion        : int
+    etiqueta          : str
+    probabilidad_mora : float
+
+
+class BatchPredictionResponse(BaseModel):
+    n_records  : int
+    predictions: List[PredictionResult]
 
 
 # ─────────────────────────────────────────────
-# 2. Inicialización de la app y carga del modelo
+# 2. Servicio de modelo
 # ─────────────────────────────────────────────
 
-app = FastAPI(
-    title="API de Predicción de Pago a Tiempo",
-    description="Despliega el mejor modelo entrenado para predicciones por batch.",
-    version="1.0.0"
-)
+class ModelDeploymentService:
+    """
+    Encapsula la carga y uso del modelo serializado.
+    Separa la lógica del modelo de la capa HTTP (FastAPI).
+    """
+    def __init__(self, model_path: Path = Path("mejor_modelo.pkl")):
+        self.model_path = Path(model_path)
+        self.model = self._load_model()
 
-# Imports de módulos internos al inicio — evita imports dentro de funciones
-try:
-    from model_evaluation import evaluation
-    _evaluation_available = True
-except ImportError:
-    _evaluation_available = False
+    def _load_model(self):
+        if not self.model_path.exists():
+            raise FileNotFoundError(
+                f"No se encontró el modelo en {self.model_path}. "
+                "Ejecuta model_training.py primero."
+            )
+        return joblib.load(self.model_path)
 
-try:
-    from model_monitoring import detectar_data_drift
-    _monitoring_available = True
-except ImportError:
-    _monitoring_available = False
+    def predict_batch(self, records: List[Dict[str, Any]]) -> BatchPredictionResponse:
+        df = pd.DataFrame(records)
+        predictions  = self.model.predict(df).tolist()
+        probabilities = self.model.predict_proba(df)[:, 0].tolist()  # prob mora (clase 0)
 
-# Carga del modelo al iniciar la app
-try:
-    model = joblib.load("mejor_modelo.pkl")
-    print("Modelo cargado correctamente.")
-    _model_loaded = True
-except Exception as e:
-    print(f"Error cargando el modelo: {e}")
-    model = None
-    _model_loaded = False
+        resultados = [
+            PredictionResult(
+                prediccion        = int(pred),
+                etiqueta          = "Paga a tiempo" if pred == 1 else "Mora",
+                probabilidad_mora = round(prob, 4),
+            )
+            for pred, prob in zip(predictions, probabilities)
+        ]
+        return BatchPredictionResponse(n_records=len(records), predictions=resultados)
 
 
 # ─────────────────────────────────────────────
-# 3. Endpoints
+# 3. Fábrica de la app
 # ─────────────────────────────────────────────
 
-@app.get("/")
-def read_root():
+def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
+    """
+    Crea y configura la aplicación FastAPI.
+    Si el modelo no se puede cargar, la API arranca en modo degradado
+    y responde con status 503 en /predict.
+    """
+    app = FastAPI(
+        title       = "API de Predicción de Pago a Tiempo",
+        description = "Despliega el mejor modelo entrenado para predicciones por batch.",
+        version     = "1.0.0",
+    )
+
+    # Intentar cargar el modelo al arrancar
+    try:
+        service       = ModelDeploymentService(model_path=model_path)
+        startup_error = None
+        print("✅ Modelo cargado correctamente.")
+    except FileNotFoundError as e:
+        service       = None
+        startup_error = str(e)
+        print(f"⚠️  Modelo no encontrado: {e}")
+
+    # ── Endpoints ─────────────────────────────
+
+    @app.get("/")
+    def read_root() -> Dict[str, str]:
+        return {
+            "status" : "ok" if service is not None else "error",
+            "message": "API de predicción en línea. Usa /predict para predicciones.",
+        }
+
+    @app.get("/health")
+    def health() -> Dict[str, Any]:
+        return {
+            "status"      : "ok" if service is not None else "error",
+            "model_path"  : str(model_path),
+            "model_loaded": service is not None,
+            "detail"      : startup_error,
+        }
+
+    @app.post("/predict", response_model=BatchPredictionResponse)
+    async def predict_batch(input_data: BatchPredictionInput) -> BatchPredictionResponse:
+        """
+        Predicciones por batch. Recibe una lista de registros preprocesados
+        y devuelve predicción, etiqueta y probabilidad de mora por registro.
+        """
+        if service is None:
+            raise HTTPException(status_code=503, detail=startup_error)
+        try:
+            records = [item.dict() for item in input_data.data]
+            return service.predict_batch(records)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error durante la predicción: {e}") from e
+
+    @app.get(
+        "/evaluation",
+        responses={200: {"content": {"image/png": {}}}},
+        description="Retorna un dashboard PNG con las métricas del modelo desplegado.",
+    )
+    async def serve_evaluation_plot() -> Response:
+        """Genera y retorna el dashboard de evaluación como imagen PNG."""
+        try:
+            from model_evaluation import evaluation
+            image_buffer = evaluation()
+            if image_buffer:
+                return Response(content=image_buffer.getvalue(), media_type="image/png")
+            raise HTTPException(status_code=500, detail="No se pudo generar el gráfico.")
+        except ImportError as e:
+            raise HTTPException(status_code=501, detail="model_evaluation.py no encontrado.") from e
+
+    @app.post("/monitor", tags=["Monitoreo"])
+    async def monitor_data_drift(datos_produccion: BatchPredictionInput) -> Dict[str, Any]:
+        """
+        Recibe un lote de datos de producción y detecta Data Drift
+        comparando con el dataset de referencia (test KS).
+        """
+        try:
+            from model_monitoring import detectar_data_drift
+        except ImportError as e:
+            raise HTTPException(status_code=501, detail="model_monitoring.py no encontrado.") from e
+
+        try:
+            df_produccion = pd.DataFrame([item.dict() for item in datos_produccion.data])
+            reporte       = detectar_data_drift(df_produccion)
+
+            if reporte.empty:
+                return {"status": "No se encontraron columnas numéricas comunes para analizar."}
+
+            reporte_json = reporte.to_dict("records")
+            hay_drift    = any(item["drift_detectado"] for item in reporte_json)
+
+            return {
+                "status"       : "Drift detectado" if hay_drift else "Sin drift significativo",
+                "hay_drift"    : hay_drift,
+                "reporte_drift": reporte_json,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error en monitoreo: {e}") from e
+
+    return app
+
+
+# ─────────────────────────────────────────────
+# 4. Generación de artefactos de imagen Docker
+# ─────────────────────────────────────────────
+
+def write_image_artifacts(base_dir: Path = Path(".")) -> Dict[str, str]:
+    """
+    Genera Dockerfile y requirements.deploy.txt en base_dir.
+    Permite reproducir la imagen de despliegue de forma programática.
+    """
+    base_dir = Path(base_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    requirements_path = base_dir / "requirements.deploy.txt"
+    dockerfile_path   = base_dir / "Dockerfile"
+
+    requirements_content = "\n".join([
+        "fastapi>=0.100.0",
+        "uvicorn[standard]>=0.22.0",
+        "pandas>=2.0.0",
+        "numpy>=1.24.0",
+        "scikit-learn>=1.2.0",
+        "xgboost>=1.7.0",
+        "imbalanced-learn>=0.12.0",
+        "joblib>=1.2.0",
+        "openpyxl>=3.1.0",
+        "scipy>=1.10.0",
+        "matplotlib>=3.7.0",
+        "seaborn>=0.12.0",
+        "pydantic>=2.0.0",
+    ])
+
+    dockerfile_content = "\n".join([
+        "FROM python:3.11-slim",
+        "WORKDIR /app",
+        "COPY requirements.deploy.txt /app/requirements.deploy.txt",
+        "RUN pip install --no-cache-dir -r /app/requirements.deploy.txt",
+        "COPY mlops_pipeline/src /app/mlops_pipeline/src",
+        "COPY mejor_modelo.pkl /app/mejor_modelo.pkl",
+        "WORKDIR /app/mlops_pipeline/src",
+        "EXPOSE 8000",
+        'CMD ["uvicorn", "model_deploy:app", "--host", "0.0.0.0", "--port", "8000"]',
+    ])
+
+    requirements_path.write_text(requirements_content, encoding="utf-8")
+    dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
+
+    print("Artefactos de imagen generados:")
+    print(f"  - requirements : {requirements_path}")
+    print(f"  - Dockerfile   : {dockerfile_path}")
+
     return {
-        "status" : "OK" if _model_loaded else "ERROR",
-        "modelo" : "cargado" if _model_loaded else "no disponible",
-        "message": "API de predicción en línea. Usa el endpoint /predict para predicciones."
+        "requirements": str(requirements_path),
+        "dockerfile"  : str(dockerfile_path),
     }
 
 
-@app.get("/health")
-def health_check():
-    """
-    Health check del modelo.
-    Retorna 503 si el modelo no está disponible — útil para
-    orquestadores como Kubernetes o load balancers.
-    """
-    if not _model_loaded:
-        raise HTTPException(
-            status_code=503,
-            detail="El modelo no está disponible. Verifica que mejor_modelo.pkl existe."
-        )
-    return {"status": "healthy", "modelo": "disponible"}
-
-
-@app.post("/predict")
-async def predict_batch(input_data: BatchPredictionInput):
-    """
-    Endpoint para predicciones por batch.
-    Recibe una lista de registros y devuelve predicciones con
-    probabilidad de mora por cada registro.
-    El pipeline incluye preprocesamiento completo internamente.
-    """
-    if not _model_loaded:
-        raise HTTPException(
-            status_code=503,
-            detail="El modelo no está disponible."
-        )
-
-    try:
-        input_list = [item.dict() for item in input_data.data]
-        df = pd.DataFrame(input_list)
-
-        predictions  = model.predict(df).tolist()
-        probabilities = model.predict_proba(df)[:, 0].tolist()  # prob mora (clase 0)
-
-        resultados = [
-            {
-                "prediccion"       : int(pred),
-                "etiqueta"         : "Paga a tiempo" if pred == 1 else "Mora",
-                "probabilidad_mora": round(prob, 4),
-            }
-            for pred, prob in zip(predictions, probabilities)
-        ]
-
-        return {"predictions": resultados}
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Error durante la predicción: {str(e)}"
-        )
-
-
-@app.get(
-    "/evaluation",
-    responses={200: {"content": {"image/png": {}}}},
-    description="Retorna imagen PNG con métricas de evaluación del modelo desplegado."
-)
-async def serve_evaluation_plot():
-    """
-    Endpoint para visualizar la evaluación del modelo.
-    Retorna un dashboard PNG con métricas, matriz de confusión,
-    curva ROC y curva Precision-Recall.
-    """
-    if not _evaluation_available:
-        raise HTTPException(
-            status_code=501,
-            detail="model_evaluation.py no encontrado."
-        )
-    try:
-        image_buffer = evaluation()
-        if image_buffer:
-            return Response(content=image_buffer.getvalue(), media_type="image/png")
-        raise HTTPException(
-            status_code=500,
-            detail="No se pudo generar el gráfico de evaluación."
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error generando evaluación: {str(e)}"
-        )
-
-
-@app.post("/monitor", tags=["Monitoreo"])
-async def monitor_data_drift(datos_produccion: BatchPredictionInput):
-    """
-    Recibe un lote de datos de producción y lo compara con el
-    dataset de referencia para detectar Data Drift usando el test KS.
-    """
-    if not _monitoring_available:
-        raise HTTPException(
-            status_code=501,
-            detail="model_monitoring.py no encontrado."
-        )
-    try:
-        df_produccion = pd.DataFrame([item.dict() for item in datos_produccion.data])
-        reporte = detectar_data_drift(df_produccion)
-
-        if reporte.empty:
-            return {"status": "No se encontraron columnas numéricas comunes para analizar."}
-
-        reporte_json = reporte.to_dict("records")
-        hay_drift    = any(item["drift_detectado"] for item in reporte_json)
-
-        return {
-            "status"       : "Drift detectado" if hay_drift else "Sin drift significativo",
-            "hay_drift"    : hay_drift,
-            "reporte_drift": reporte_json,
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Error en monitoreo: {str(e)}"
-        )
-
-
 # ─────────────────────────────────────────────
-# 4. Ejecución
+# 5. Instancia de la app y ejecución local
 # ─────────────────────────────────────────────
 
-# Ejecución local:
-#   python model_deploy.py
-#
-# Ejecución con Docker (imagen con librerías y código):
-#   docker build -t modelo-mora .
-#   docker run -p 8000:8000 modelo-mora
-#
-# API disponible en : http://localhost:8000
-# Documentación en  : http://localhost:8000/docs
+app = create_app()
 
 if __name__ == "__main__":
+    write_image_artifacts(Path("."))
     uvicorn.run("model_deploy:app", host="0.0.0.0", port=8000, reload=True)
