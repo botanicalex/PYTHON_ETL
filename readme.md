@@ -21,25 +21,23 @@ PYTHON_ETL/
 │       ├── Cargar_datos.ipynb          # Carga y exploración inicial del dataset
 │       ├── comprension_eda.ipynb       # Análisis exploratorio de datos (EDA)
 │       ├── ft_engineering.py           # Pipeline de feature engineering
-│       ├── hueristic_model.py          # Modelo heurístico baseline
+│       ├── heuristic_model.py          # Modelo heurístico baseline
 │       ├── model_training.py           # Entrenamiento y comparación de modelos
 │       ├── model_deploy.py             # API REST con FastAPI
 │       ├── model_evaluation.py         # Dashboard de métricas del modelo
 │       └── model_monitoring.py         # Detección de Data Drift (KS test)
-├── Base_de_datos.xlsx                  # Dataset fuente
 ├── mejor_modelo.pkl                    # Modelo entrenado serializado
 ├── Dockerfile                          # Imagen Docker para despliegue
 ├── requirements.txt                    # Dependencias del proyecto
 ├── config.json                         # Configuración del proyecto
 ├── .gitignore                          # Exclusiones para Git
-├── set_up.bat                          # Script de configuración inicial
-└── readme.md                           # Documentación del proyecto
+└── set_up.bat                          # Script de configuración inicial
 ```
 
 ## Instalación
 
 ### Prerrequisitos
-- Python 3.13 o superior
+- Python >= 3.10
 - Git
 - Docker Desktop (para despliegue en contenedor)
 
@@ -126,7 +124,7 @@ Datos → Feature Engineering → Split → Entrenamiento → Evaluación → De
 
 ## Tecnologías Utilizadas
 
-- **Python 3.13**
+- **Python >= 3.10**
 - **scikit-learn** — modelos y pipelines
 - **XGBoost** — gradient boosting
 - **imbalanced-learn** — SMOTE para desbalance de clases
