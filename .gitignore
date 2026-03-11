@@ -50,9 +50,3 @@ pip-wheel-metadata/
 # Archivos de sistema
 Thumbs.db
 desktop.ini
-
-*.pkl
-*.png
-cargar_datos_tmp.py
-prueba.py
-=1.7.0

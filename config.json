@@ -1,0 +1,18 @@
+{
+    "project_code": "botanicalex",
+    "project_name": "credit_risk_mlops",
+    "username": "botanicalex",
+    "github_repo": "https://github.com/botanicalex/PYTHON_ETL",
+    "bucket": "",
+    "database": "",
+    "proyecto": "PYTHON_ETL",
+    "data_file": "Base_de_datos.xlsx",
+    "model_file": "mejor_modelo.pkl",
+    "target": "Pago_atiempo",
+    "test_size": 0.2,
+    "random_state": 42,
+    "api_host": "0.0.0.0",
+    "api_port": 8000,
+    "monitoring_period_days": 7,
+    "drift_threshold": 0.05
+}
