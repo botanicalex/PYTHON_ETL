@@ -113,19 +113,27 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     cv_results_df : pd.DataFrame con scores por fold.
     metrics_df    : pd.DataFrame con resumen train vs CV.
     """
-    scoring_metrics = ["accuracy", "f1", "precision", "recall"]
-    kfold = KFold(n_splits=n_splits)
+    from sklearn.metrics import make_scorer, f1_score, precision_score, recall_score
+
+    scoring_metrics = {
+        "accuracy" : "accuracy",
+        "f1"       : make_scorer(f1_score,        pos_label=0, zero_division=0),
+        "precision": make_scorer(precision_score,  pos_label=0, zero_division=0),
+        "recall"   : make_scorer(recall_score,     pos_label=0, zero_division=0),
+    }
+    kfold      = KFold(n_splits=n_splits)
     model_pipe = Pipeline(steps=[("model", model)])
 
-    cv_results = {}
+    cv_results   = {}
     train_results = {}
 
-    for metric in scoring_metrics:
-        cv_results[metric] = cross_val_score(
-            model_pipe, X_train, y_train, cv=kfold, scoring=metric
+    for metric_name, scorer in scoring_metrics.items():
+        cv_results[metric_name] = cross_val_score(
+            model_pipe, X_train, y_train, cv=kfold, scoring=scorer
         )
-        model_pipe.fit(X_train, y_train)
-        train_results[metric] = model_pipe.score(X_train, y_train)
+        train_results[metric_name] = cross_val_score(
+            model_pipe, X_train, y_train, cv=KFold(n_splits=2), scoring=scorer
+        ).mean()
 
     cv_results_df = pd.DataFrame(cv_results)
 
@@ -138,11 +146,12 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     plt.show()
 
     # ── Train vs CV ───────────────────────────
+    metric_names = list(scoring_metrics.keys())
     metrics_df = pd.DataFrame({
-        "Metric"      : scoring_metrics,
-        "Train Score" : [train_results[m] for m in scoring_metrics],
-        "CV Mean"     : [cv_results_df[m].mean() for m in scoring_metrics],
-        "CV Std"      : [cv_results_df[m].std()  for m in scoring_metrics],
+        "Metric"      : metric_names,
+        "Train Score" : [train_results[m] for m in metric_names],
+        "CV Mean"     : [cv_results_df[m].mean() for m in metric_names],
+        "CV Std"      : [cv_results_df[m].std()  for m in metric_names],
     })
 
     metrics_df.plot(
