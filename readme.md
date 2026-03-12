@@ -10,7 +10,7 @@ Pipeline MLOps completo para predicción de incumplimiento crediticio en una emp
 
 - **Dataset:** 10,763 registros | 23 variables
 - **Variable objetivo:** `Pago_atiempo` (desbalance 95% / 5%)
-- **Mejor modelo:** Logistic Regression con SMOTE (Recall mora: 0.65 | ROC-AUC: 0.6493)
+- **Mejor modelo:** Logistic Regression con SMOTE (Recall mora: 0.65 | ROC-AUC: 0.7005)
 
 ## Estructura del Proyecto
 
@@ -119,10 +119,10 @@ Datos → Feature Engineering → Split → Entrenamiento → Evaluación → De
 ### Modelos evaluados
 | Modelo | CV F-beta | Test Recall | Test ROC-AUC |
 |--------|-----------|-------------|--------------|
-| Logistic Regression | 0.2573 | 0.65 | 0.6493 |
-| Random Forest | 0.0183 | 0.03 | 0.5128 |
-| Gradient Boosting | 0.0501 | 0.07 | 0.5315 |
-| XGBoost | 0.0093 | 0.02 | 0.5100 |
+| Logistic Regression | 0.2573 | 0.65 | 0.7005 |
+| Random Forest | 0.0183 | 0.03 | 0.6677 |
+| Gradient Boosting | 0.0501 | 0.07 | 0.6700 |
+| XGBoost | 0.0093 | 0.02 | 0.6548 |
 
 **Modelo seleccionado:** Logistic Regression (class_weight=balanced, SMOTE)  
 **Criterio de selección:** Selection Score = Performance (60% F-beta) + Consistency (25% estabilidad CV) + Scalability (15% velocidad de entrenamiento)
