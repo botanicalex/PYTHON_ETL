@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import KFold, ShuffleSplit, cross_val_score, learning_curve
+from sklearn.model_selection import KFold, ShuffleSplit, cross_val_score, cross_validate, learning_curve
 from sklearn.metrics import classification_report, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
@@ -113,20 +113,27 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     cv_results_df : pd.DataFrame con scores por fold.
     metrics_df    : pd.DataFrame con resumen train vs CV.
     """
-    scoring_metrics = ["accuracy", "f1", "precision", "recall"]
-    kfold = KFold(n_splits=n_splits)
+    from sklearn.metrics import make_scorer, f1_score, precision_score, recall_score
+
+    scoring_metrics = {
+        "accuracy" : "accuracy",
+        "f1"       : make_scorer(f1_score,        pos_label=0, zero_division=0),
+        "precision": make_scorer(precision_score,  pos_label=0, zero_division=0),
+        "recall"   : make_scorer(recall_score,     pos_label=0, zero_division=0),
+    }
+    kfold      = KFold(n_splits=n_splits)
     model_pipe = Pipeline(steps=[("model", model)])
 
-    cv_results = {}
-    train_results = {}
+    cv_output = cross_validate(
+        model_pipe, X_train, y_train,
+        cv=kfold,
+        scoring=scoring_metrics,
+        return_train_score=True,
+        n_jobs=-1,
+    )
 
-    for metric in scoring_metrics:
-        cv_results[metric] = cross_val_score(
-            model_pipe, X_train, y_train, cv=kfold, scoring=metric
-        )
-        model_pipe.fit(X_train, y_train)
-        train_results[metric] = model_pipe.score(X_train, y_train)
-
+    cv_results    = {m: cv_output[f"test_{m}"]              for m in scoring_metrics}
+    train_results = {m: np.mean(cv_output[f"train_{m}"]) for m in scoring_metrics}
     cv_results_df = pd.DataFrame(cv_results)
 
     # ── Variabilidad entre métricas ────────────
@@ -138,11 +145,12 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     plt.show()
 
     # ── Train vs CV ───────────────────────────
+    metric_names = list(scoring_metrics.keys())
     metrics_df = pd.DataFrame({
-        "Metric"      : scoring_metrics,
-        "Train Score" : [train_results[m] for m in scoring_metrics],
-        "CV Mean"     : [cv_results_df[m].mean() for m in scoring_metrics],
-        "CV Std"      : [cv_results_df[m].std()  for m in scoring_metrics],
+        "Metric"      : metric_names,
+        "Train Score" : [train_results[m] for m in metric_names],
+        "CV Mean"     : [cv_results_df[m].mean() for m in metric_names],
+        "CV Std"      : [cv_results_df[m].std()  for m in metric_names],
     })
 
     metrics_df.plot(
@@ -158,7 +166,7 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     model_pipe.fit(X_train, y_train)
     y_pred = model_pipe.predict(X_test)
     print("\nReporte de clasificación – Modelo Heurístico:")
-    print(classification_report(y_test, y_pred))
+    print(classification_report(y_test, y_pred, zero_division=0))
     ConfusionMatrixDisplay.from_predictions(y_test, y_pred)
     plt.title("Matriz de Confusión – Modelo Heurístico")
     plt.show()
@@ -170,10 +178,10 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
         "train_sizes" : np.linspace(0.1, 1.0, 5),
         "cv"          : ShuffleSplit(n_splits=50, test_size=0.2, random_state=123),
         "n_jobs"      : -1,
-        "return_times": True,
+        "return_times": False,
     }
-    train_sizes, train_scores, test_scores, fit_times, score_times = learning_curve(
-        model_pipe, scoring="recall", **common_params
+    train_sizes, train_scores, test_scores = learning_curve(
+        model_pipe, scoring=make_scorer(recall_score, pos_label=0, zero_division=0), **common_params
     )
 
     fig, ax = plt.subplots(figsize=(10, 6))
