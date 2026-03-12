@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
@@ -19,6 +19,7 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, roc_auc_score, fbeta_score,
     classification_report, balanced_accuracy_score,
+    make_scorer,
 )
 from sklearn.model_selection import StratifiedKFold, ShuffleSplit, cross_validate, learning_curve
 from sklearn.base import clone
@@ -36,7 +37,6 @@ OUTPUT_DIR = Path("outputs")
 # → detectar morosos es más costoso que falsos positivos
 # ─────────────────────────────────────────────
 
-from sklearn.metrics import make_scorer
 fbeta_mora   = make_scorer(fbeta_score, beta=2, pos_label=0, zero_division=0)
 cv_strategy  = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
@@ -118,7 +118,6 @@ def evaluate_candidate(
     y_train    : pd.Series,
     y_test     : pd.Series,
 ) -> Dict:
-    model_name_clf = estimator.__class__.__name__
     pipe = build_model(estimator)
 
     # CV sin sample_weight (SMOTE dentro del pipeline balancea las clases)
@@ -267,7 +266,7 @@ def plot_model_comparison(summary: pd.DataFrame) -> None:
 
 
 # ─────────────────────────────────────────────
-# 7. train_and_select_model
+# 8. train_and_select_model
 # ─────────────────────────────────────────────
 
 def train_and_select_model(data_path: str = "Base_de_datos.xlsx") -> ModelResult:
@@ -318,7 +317,7 @@ def train_and_select_model(data_path: str = "Base_de_datos.xlsx") -> ModelResult
     ).reset_index(drop=True)
 
     print("\n=== TABLA RESUMEN ===")
-    print(summary.drop(columns=[]).round(4).to_string(index=False))
+    print(summary.round(4).to_string(index=False))
 
     # Gráfico comparativo
     plot_model_comparison(summary)
@@ -346,7 +345,7 @@ def train_and_select_model(data_path: str = "Base_de_datos.xlsx") -> ModelResult
 
 
 # ─────────────────────────────────────────────
-# 8. Ejecución principal
+# 9. Ejecución principal
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":

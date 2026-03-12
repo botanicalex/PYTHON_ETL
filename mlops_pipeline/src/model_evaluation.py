@@ -1,4 +1,5 @@
 import io
+import os
 import joblib
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,9 +11,10 @@ from sklearn.metrics import (
     roc_auc_score, roc_curve, precision_recall_curve,
 )
 
+from typing import Optional
+
 from ft_engineering import build_feature_pipeline
 
-import os
 os.makedirs("outputs", exist_ok=True)
 
 
@@ -22,7 +24,7 @@ os.makedirs("outputs", exist_ok=True)
 # Retorna un buffer PNG para ser servido por el endpoint /evaluation.
 # ─────────────────────────────────────────────
 
-def evaluation() -> io.BytesIO:
+def evaluation() -> Optional[io.BytesIO]:
     """
     Carga el modelo desplegado y los datos de test,
     genera un dashboard con:
@@ -47,7 +49,7 @@ def evaluation() -> io.BytesIO:
 
     # Predicciones
     y_pred  = model.predict(X_test)
-    y_proba = model.predict_proba(X_test)[:, 1]  # probabilidad clase mora (0)
+    y_proba = model.predict_proba(X_test)[:, 0]  # probabilidad clase mora (0)
 
     # ── Métricas ──────────────────────────────
     report = classification_report(
@@ -145,7 +147,7 @@ def evaluation() -> io.BytesIO:
     ax_pr.spines[["top", "right"]].set_visible(False)
 
     plt.suptitle(
-        f"Evaluación del modelo desplegado — {model.steps[-1][0]}",
+        f"Evaluación del modelo desplegado — {model.steps[-1][1].__class__.__name__}",
         fontsize=14, fontweight="bold", y=1.01
     )
     plt.tight_layout()

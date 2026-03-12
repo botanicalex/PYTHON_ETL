@@ -158,7 +158,7 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     model_pipe.fit(X_train, y_train)
     y_pred = model_pipe.predict(X_test)
     print("\nReporte de clasificación – Modelo Heurístico:")
-    print(classification_report(y_test, y_pred))
+    print(classification_report(y_test, y_pred, zero_division=0))
     ConfusionMatrixDisplay.from_predictions(y_test, y_pred)
     plt.title("Matriz de Confusión – Modelo Heurístico")
     plt.show()
@@ -170,9 +170,9 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
         "train_sizes" : np.linspace(0.1, 1.0, 5),
         "cv"          : ShuffleSplit(n_splits=50, test_size=0.2, random_state=123),
         "n_jobs"      : -1,
-        "return_times": True,
+        "return_times": False,
     }
-    train_sizes, train_scores, test_scores, fit_times, score_times = learning_curve(
+    train_sizes, train_scores, test_scores = learning_curve(
         model_pipe, scoring="recall", **common_params
     )
 

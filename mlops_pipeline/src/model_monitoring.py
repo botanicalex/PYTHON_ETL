@@ -1,4 +1,5 @@
 import io
+import os
 import joblib
 import pandas as pd
 import numpy as np
@@ -7,9 +8,10 @@ import matplotlib.pyplot as plt
 from scipy.stats import ks_2samp
 from sklearn.metrics import classification_report
 
+from typing import Optional
+
 from ft_engineering import build_feature_pipeline
 
-import os
 os.makedirs("outputs", exist_ok=True)
 
 
@@ -85,7 +87,7 @@ def detectar_data_drift(df_produccion: pd.DataFrame,
 # ─────────────────────────────────────────────
 
 def monitoreo_periodico(fraccion_muestra: float = 0.1,
-                        umbral_pvalue: float = 0.05) -> io.BytesIO:
+                        umbral_pvalue: float = 0.05) -> Optional[io.BytesIO]:
     """
     Simula el monitoreo periódico del modelo:
     1. Toma una muestra aleatoria del dataset como proxy de datos de producción
@@ -101,14 +103,17 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
         io.BytesIO: buffer PNG con el reporte visual
     """
     # Cargar modelo y datos
-    model = joblib.load("mejor_modelo.pkl")
+    try:
+        model = joblib.load("mejor_modelo.pkl")
+    except FileNotFoundError:
+        print("Error: mejor_modelo.pkl no encontrado.")
+        return None
     df    = pd.read_excel("Base_de_datos.xlsx")
     X_train, X_test, y_train, y_test, _ = build_feature_pipeline(df)
 
     # Muestra de producción (simulada)
     n_muestra    = max(50, int(len(X_test) * fraccion_muestra))
     df_muestra   = X_test.sample(n=n_muestra, random_state=42)
-    y_muestra    = y_test.loc[df_muestra.index]
 
     # Predicciones sobre la muestra
     y_pred       = model.predict(df_muestra)
@@ -131,7 +136,7 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
     print("\n=== REPORTE DE DATA DRIFT ===")
     print(reporte_drift.to_string())
 
-    variables_con_drift = reporte_drift[reporte_drift["drift_detectado"]].index.tolist()
+    variables_con_drift = reporte_drift[reporte_drift["drift_detectado"]]["variable"].tolist()
     print(f"\nVariables con drift detectado: {variables_con_drift if variables_con_drift else 'Ninguna'}")
 
     # ── Gráfico de monitoreo ──────────────────
@@ -139,8 +144,9 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
 
     # 1. Distribución de predicciones
     conteo = pd.Series(y_pred).map({1: "Paga a tiempo", 0: "Mora"}).value_counts()
-    axes[0].bar(conteo.index, conteo.values,
-                color=["steelblue", "coral"], edgecolor="white")
+    color_map = {"Paga a tiempo": "steelblue", "Mora": "coral"}
+    colores_barras = [color_map.get(label, "gray") for label in conteo.index]
+    axes[0].bar(conteo.index, conteo.values, color=colores_barras, edgecolor="white")
     for i, (label, val) in enumerate(conteo.items()):
         axes[0].text(i, val + 0.5, str(val), ha="center", fontsize=10)
     axes[0].set_title("Distribución de predicciones\n(muestra producción)", fontweight="bold")
@@ -159,7 +165,8 @@ def monitoreo_periodico(fraccion_muestra: float = 0.1,
     axes[1].spines[["top", "right"]].set_visible(False)
 
     # 3. Comparación de medias: referencia vs producción
-    diff = (reporte_drift.set_index("variable")["media_produccion"] - reporte_drift.set_index("variable")["media_referencia"]).abs()
+    reporte_idx = reporte_drift.set_index("variable")
+    diff = (reporte_idx["media_produccion"] - reporte_idx["media_referencia"]).abs()
     diff = diff.sort_values(ascending=False).head(8)
     axes[2].barh(diff.index, diff.values, color="mediumpurple", edgecolor="white")
     axes[2].set_title("Diferencia de medias\n(referencia vs producción)", fontweight="bold")
