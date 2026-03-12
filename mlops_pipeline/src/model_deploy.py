@@ -112,11 +112,11 @@ def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
     try:
         service       = ModelDeploymentService(model_path=model_path)
         startup_error = None
-        print("✅ Modelo cargado correctamente.")
-    except FileNotFoundError as e:
+        print("Modelo cargado correctamente.")
+    except Exception as e:
         service       = None
         startup_error = str(e)
-        print(f"⚠️  Modelo no encontrado: {e}")
+        print(f" Error al cargar el modelo: {e}")
 
     # ── Endpoints ─────────────────────────────
 
@@ -179,10 +179,14 @@ def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
 
         try:
             df_produccion = pd.DataFrame([item.dict() for item in datos_produccion.data])
-            reporte       = detectar_data_drift(df_produccion)
+
+            if len(df_produccion) < 2:
+                return {"status": "Muestra insuficiente para análisis de drift (mínimo 2 registros)."}
+
+            reporte = detectar_data_drift(df_produccion)
 
             if reporte.empty:
-                return {"status": "Muestra insuficiente para análisis de drift (mínimo 2 registros)."}
+                return {"status": "No se encontraron columnas numéricas en común. Verifique el esquema de los datos enviados."}
 
             reporte_json = reporte.to_dict("records")
             hay_drift    = any(item["drift_detectado"] for item in reporte_json)

@@ -10,9 +10,22 @@ from sklearn.metrics import classification_report
 
 from typing import Optional
 
+from functools import lru_cache
+
 from ft_engineering import build_feature_pipeline
 
 os.makedirs("outputs", exist_ok=True)
+
+
+@lru_cache(maxsize=1)
+def _get_reference_X_train() -> pd.DataFrame:
+    """
+    Carga y procesa el dataset de referencia solo una vez por proceso.
+    El resultado se cachea para evitar I/O repetido en cada llamada a detectar_data_drift.
+    """
+    df_ref = pd.read_excel("Base_de_datos.xlsx")
+    X_train, *_ = build_feature_pipeline(df_ref)
+    return X_train
 
 
 # ─────────────────────────────────────────────
@@ -38,9 +51,8 @@ def detectar_data_drift(df_produccion: pd.DataFrame,
     Returns:
         DataFrame con estadístico KS, p-value y flag de drift por variable
     """
-    # Cargar datos de referencia
-    df_ref = pd.read_excel("Base_de_datos.xlsx")
-    X_train, _, _, _, _ = build_feature_pipeline(df_ref)
+    # Cargar datos de referencia (cacheados en memoria)
+    X_train = _get_reference_X_train()
 
     # Solo variables numéricas comunes
     cols_numericas = X_train.select_dtypes(include=np.number).columns.tolist()

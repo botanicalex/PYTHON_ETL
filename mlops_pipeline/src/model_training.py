@@ -64,7 +64,7 @@ class ModelResult:
 # 2. summarize_classification
 # ─────────────────────────────────────────────
 
-def summarize_classification(y_true, y_pred) -> Dict[str, float]:
+def summarize_classification(y_true, y_pred, y_proba=None) -> Dict[str, float]:
     return {
         "accuracy"          : accuracy_score(y_true, y_pred),
         "balanced_accuracy" : balanced_accuracy_score(y_true, y_pred),
@@ -72,7 +72,7 @@ def summarize_classification(y_true, y_pred) -> Dict[str, float]:
         "recall"            : recall_score(y_true, y_pred,    pos_label=0, zero_division=0),
         "f1"                : f1_score(y_true, y_pred,        pos_label=0, zero_division=0),
         "fbeta"             : fbeta_score(y_true, y_pred, beta=2, pos_label=0, zero_division=0),
-        "roc_auc"           : roc_auc_score(y_true, y_pred),
+        "roc_auc"           : roc_auc_score(y_true, y_proba) if y_proba is not None else roc_auc_score(y_true, y_pred),
         "casos_mora_pred"   : int(np.count_nonzero(y_pred == 0)),
     }
 
@@ -133,8 +133,9 @@ def evaluate_candidate(
     # Fit final — SMOTE dentro del pipeline balancea las clases
     pipe.fit(X_train, y_train)
 
-    y_pred = pipe.predict(X_test)
-    test   = summarize_classification(y_test, y_pred)
+    y_pred  = pipe.predict(X_test)
+    y_proba = pipe.predict_proba(X_test)[:, 0]  # probabilidad clase mora (0)
+    test    = summarize_classification(y_test, y_pred, y_proba)
 
     # Curva de aprendizaje + escalabilidad
     plot_learning_curve(estimator, model_name, X_train, y_train)
