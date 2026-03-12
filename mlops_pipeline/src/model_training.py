@@ -134,7 +134,7 @@ def evaluate_candidate(
     pipe.fit(X_train, y_train)
 
     y_pred  = pipe.predict(X_test)
-    y_proba = pipe.predict_proba(X_test)[:, 0]  # probabilidad clase mora (0)
+    y_proba = pipe.predict_proba(X_test)[:, 1]  # probabilidad clase 1 (paga a tiempo) para ROC-AUC
     test    = summarize_classification(y_test, y_pred, y_proba)
 
     # Curva de aprendizaje + escalabilidad

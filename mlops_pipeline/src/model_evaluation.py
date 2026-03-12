@@ -63,7 +63,7 @@ def evaluation() -> Optional[io.BytesIO]:
         "Precision (mora)" : round(report["Mora"]["precision"], 4),
         "Recall (mora)"    : round(report["Mora"]["recall"],    4),
         "F1 (mora)"        : round(report["Mora"]["f1-score"],  4),
-        "ROC-AUC"          : round(roc_auc_score(y_test, y_proba), 4),
+        "ROC-AUC"          : round(roc_auc_score(y_test, y_proba, pos_label=0), 4),
         "Accuracy"         : round(report["accuracy"], 4),
         "Soporte mora"     : int(report["Mora"]["support"]),
     }
