@@ -49,7 +49,7 @@ def evaluation() -> Optional[io.BytesIO]:
 
     # Predicciones
     y_pred  = model.predict(X_test)
-    y_proba = model.predict_proba(X_test)[:, 0]  # probabilidad clase mora (0)
+    y_proba = model.predict_proba(X_test)[:, 1]  # clase 1 para roc_auc_score
 
     # ── Métricas ──────────────────────────────
     report = classification_report(
@@ -63,7 +63,7 @@ def evaluation() -> Optional[io.BytesIO]:
         "Precision (mora)" : round(report["Mora"]["precision"], 4),
         "Recall (mora)"    : round(report["Mora"]["recall"],    4),
         "F1 (mora)"        : round(report["Mora"]["f1-score"],  4),
-        "ROC-AUC"          : round(roc_auc_score(y_test, y_proba, pos_label=0), 4),
+        "ROC-AUC"          : round(roc_auc_score(y_test, y_proba), 4),
         "Accuracy"         : round(report["accuracy"], 4),
         "Soporte mora"     : int(report["Mora"]["support"]),
     }
@@ -127,7 +127,7 @@ def evaluation() -> Optional[io.BytesIO]:
 
     # 4. Curva ROC
     ax_roc = fig.add_subplot(gs[1, 0:2])
-    fpr, tpr, _ = roc_curve(y_test, y_proba, pos_label=0)
+    fpr, tpr, _ = roc_curve(y_test, y_proba, pos_label=1)
     ax_roc.plot(fpr, tpr, color="steelblue", lw=2,
                 label=f"ROC curve (AUC = {metricas_mora['ROC-AUC']:.4f})")
     ax_roc.plot([0, 1], [0, 1], "k--", alpha=0.4, label="Random classifier")
