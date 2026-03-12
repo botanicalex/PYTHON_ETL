@@ -68,7 +68,13 @@ class ModelDeploymentService:
                 f"No se encontró el modelo en {self.model_path}. "
                 "Ejecuta model_training.py primero."
             )
-        return joblib.load(self.model_path)
+        model = joblib.load(self.model_path)
+        if not hasattr(model, "predict_proba"):
+            raise AttributeError(
+                "El modelo cargado no implementa 'predict_proba'. "
+                "Asegurate de desplegar un modelo que soporte probabilidades."
+            )
+        return model
 
     def predict_batch(self, records: List[Dict[str, Any]]) -> BatchPredictionResponse:
         df = pd.DataFrame(records)
@@ -106,11 +112,11 @@ def create_app(model_path: Path = Path("mejor_modelo.pkl")) -> FastAPI:
     try:
         service       = ModelDeploymentService(model_path=model_path)
         startup_error = None
-        print("Modelo cargado correctamente.")
+        print("✅ Modelo cargado correctamente.")
     except FileNotFoundError as e:
         service       = None
         startup_error = str(e)
-        print(f"Modelo no encontrado: {e}")
+        print(f"⚠️  Modelo no encontrado: {e}")
 
     # ── Endpoints ─────────────────────────────
 

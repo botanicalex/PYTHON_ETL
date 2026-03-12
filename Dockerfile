@@ -41,6 +41,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copiar código fuente
 # ─────────────────────────────────────────────
 COPY mlops_pipeline/src/ .
+COPY mejor_modelo.pkl .
 
 # ─────────────────────────────────────────────
 # Exponer puerto de la API
