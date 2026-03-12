@@ -181,7 +181,7 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
         "return_times": False,
     }
     train_sizes, train_scores, test_scores = learning_curve(
-        model_pipe, scoring="recall", **common_params
+        model_pipe, scoring=make_scorer(recall_score, pos_label=0, zero_division=0), **common_params
     )
 
     fig, ax = plt.subplots(figsize=(10, 6))
