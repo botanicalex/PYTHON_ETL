@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import KFold, ShuffleSplit, cross_val_score, learning_curve
+from sklearn.model_selection import KFold, ShuffleSplit, cross_val_score, cross_validate, learning_curve
 from sklearn.metrics import classification_report, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
@@ -124,17 +124,16 @@ def evaluate_heuristic(model, X_train, X_test, y_train, y_test, n_splits: int = 
     kfold      = KFold(n_splits=n_splits)
     model_pipe = Pipeline(steps=[("model", model)])
 
-    cv_results   = {}
-    train_results = {}
+    cv_output = cross_validate(
+        model_pipe, X_train, y_train,
+        cv=kfold,
+        scoring=scoring_metrics,
+        return_train_score=True,
+        n_jobs=-1,
+    )
 
-    for metric_name, scorer in scoring_metrics.items():
-        cv_results[metric_name] = cross_val_score(
-            model_pipe, X_train, y_train, cv=kfold, scoring=scorer
-        )
-        train_results[metric_name] = cross_val_score(
-            model_pipe, X_train, y_train, cv=KFold(n_splits=2), scoring=scorer
-        ).mean()
-
+    cv_results    = {m: cv_output[f"test_{m}"]              for m in scoring_metrics}
+    train_results = {m: np.mean(cv_output[f"train_{m}"]) for m in scoring_metrics}
     cv_results_df = pd.DataFrame(cv_results)
 
     # ── Variabilidad entre métricas ────────────
