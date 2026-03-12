@@ -1,89 +1,62 @@
-﻿REM ===================================
-REM Author: juan.parra
-REM Purpose: Script to setup a Python virtual environment, install requirements, 
-REM ===================================
- 
+﻿@echo off
+echo ================================================
+echo   PYTHON_ETL - Configuracion inicial
+echo   Ciencia de Datos en Produccion 2026-1
+echo ================================================
 echo.
-echo === Python Virtual Environment Setup ===
+
+REM Verificar que Python este instalado
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Python no encontrado. Instala Python 3.10 o superior.
+    pause
+    exit /b 1
+)
+
+echo [OK] Python encontrado:
+python --version
 echo.
- 
-REM Desactivar el ambiente virtual actual si está activo
-if defined VIRTUAL_ENV (
-    echo Desactivando ambiente virtual actual: %VIRTUAL_ENV%
-    call deactivate
+
+REM Crear entorno virtual
+echo [1/3] Creando entorno virtual...
+python -m venv .venv
+if %errorlevel% neq 0 (
+    echo [ERROR] No se pudo crear el entorno virtual.
+    pause
+    exit /b 1
 )
- 
-echo Buscando código del proyecto en config.json...
- 
-@echo off
-setlocal EnableDelayedExpansion
- 
-REM Cambiar al directorio donde está config.json
-if not exist "src\config.json" (
-    echo Error: No se encontró "config.json" en el directorio "src". Asegúrate de que la ruta es correcta.
-    goto :eof
-)
- 
-cd src
- 
-for /f "usebackq tokens=2 delims=:" %%A in (`findstr "project_code" config.json`) do (
-    set "line=%%A"
-    set "line=!line:,=!"
-    set "line=!line:"=!"
-    set "project_code=!line:~1!"
-)
- 
- 
-echo Project code encontrado: [%project_code%]
- 
-REM Volver al directorio raíz
-cd ..
- 
-echo Creando nuevo ambiente virtual: %project_code%-venv
-py -m venv %project_code%-venv
- 
-echo Activating virtual environment...
-call %project_code%-venv\Scripts\activate
- 
-if %ERRORLEVEL% EQU 0 (
-    echo.
-    echo Ambiente virtual creado con exito!.
-    echo Python actual: 
-    where python
-    echo.
-    echo Directorio actual: %cd%
-    echo ================================
-    dir /b
-    echo === Instalando requisitos ===
-    if exist requirements.txt (
-        echo requirements.txt encontrado, instalando librerias...
-        "%project_code%-venv\Scripts\python.exe" -m pip install --no-cache-dir -r requirements.txt
-        if %ERRORLEVEL% EQU 0 (
-            echo.
-            echo Todas las librerías instaladas correctamente.
- 
-            echo.
-            echo === Registrando ambiente virtual con Jupyter ===
-            echo Registrando kernel con Jupyter...
-            python -m ipykernel install --user --name=%project_code%-venv --display-name="%project_code%-venv Python ETL"
-            if %ERRORLEVEL% EQU 0 (
-                echo Ambiente virtual registrado como kernel de Jupyter correctamente.
-                echo Ahora puedes seleccionar "%project_code%-venv Python ETL" en Jupyter notebook.
-            ) else (
-                echo Advertencia: Fallo al registrar el ambiente virtual como kernel de Jupyter. Jupyter notebook puede no reconocer este ambiente virtual.
-            )
- 
-        ) else (
-            echo.
-            echo Error instalando las librerías desde requirements.txt. Revisar los mensajes de error.
-        )
-    ) else (
-        echo.
-        echo Advertencias: requirements.txt no fue en contrado en el directorio actual.
-    )
-) else (
-    echo.
-    echo Error activando el ambiente virtual.
-)
- 
+echo [OK] Entorno virtual creado en .venv
 echo.
+
+REM Activar entorno virtual
+echo [2/3] Activando entorno virtual...
+call .venv\Scripts\activate.bat
+echo [OK] Entorno virtual activado
+echo.
+
+REM Instalar dependencias
+echo [3/3] Instalando dependencias desde requirements.txt...
+pip install --upgrade pip
+pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo [ERROR] No se pudieron instalar las dependencias.
+    pause
+    exit /b 1
+)
+echo [OK] Dependencias instaladas correctamente
+echo.
+
+echo ================================================
+echo   Instalacion completada exitosamente
+echo.
+echo   Para activar el entorno virtual:
+echo     .venv\Scripts\activate
+echo.
+echo   Para correr la API:
+echo     cd mlops_pipeline\src
+echo     python model_deploy.py
+echo.
+echo   API disponible en: http://localhost:8000
+echo   Documentacion en: http://localhost:8000/docs
+echo ================================================
+pause
