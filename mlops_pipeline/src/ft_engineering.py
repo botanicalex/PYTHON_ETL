@@ -219,12 +219,14 @@ def build_feature_pipeline(df: pd.DataFrame, test_size: float = 0.2, random_stat
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
+    from gcp_utils import load_data_from_gcp
+
     print("=" * 55)
     print("   FEATURE ENGINEERING PIPELINE – ft_engineering.py")
     print("=" * 55)
 
-    print("\nCargando dataset...")
-    df = pd.read_excel("Base_de_datos.xlsx")
+    print("\nCargando dataset desde GCP...")
+    df = load_data_from_gcp()
     print(f"   Filas: {df.shape[0]} | Columnas: {df.shape[1]}")
     nulos = df.isnull().sum()
     nulos = nulos[nulos > 0]

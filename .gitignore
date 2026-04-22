@@ -50,3 +50,8 @@ pip-wheel-metadata/
 # Archivos de sistema
 Thumbs.db
 desktop.ini
+
+# Credenciales GCP
+gcp_credentials.json
+*.json.key
+service_account*.json
