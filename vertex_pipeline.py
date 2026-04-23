@@ -233,7 +233,7 @@ if __name__ == "__main__":
     )
 
     print("\nEnviando pipeline a Vertex AI...")
-    job.submit(service_account=SERVICE_ACCOUNT)
+    job.submit()
     print(f"\nPipeline enviado.")
     print(f"Nombre : {job.name}")
     print(f"Console: https://console.cloud.google.com/vertex-ai/pipelines?project={GCP_PROJECT}")
