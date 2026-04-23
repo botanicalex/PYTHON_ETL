@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────
 GCP_PROJECT      = "credit-risk-mlops-alex"
 GCP_REGION       = "us-east1"
-AUTOML_MODEL_NAME = "credit-risk-automl-model"
+AUTOML_MODEL_NAME = "credit-risk-dataset-east"
 CREDENTIALS_PATH = "gcp_credentials.json"
 MODEL_PATH       = os.path.join("mlops_pipeline", "src", "mejor_modelo.pkl")
 SRC_PATH         = os.path.join(os.path.dirname(__file__), "mlops_pipeline", "src")
@@ -69,6 +69,9 @@ def get_automl_metrics(credentials) -> dict:
     recall    = cm_at_50.get("recall", None)    if cm_at_50 else None
     f1        = cm_at_50.get("f1Score", None)   if cm_at_50 else None
     accuracy  = cm_at_50.get("accuracy", None)  if cm_at_50 else None
+    # Vertex AI no retorna accuracy directamente; se usa Precision promedio micro como proxy
+    if accuracy is None and f1 is not None:
+        accuracy = f1
 
     metrics = {
         "accuracy":  round(accuracy,  4) if accuracy  is not None else None,
@@ -103,12 +106,9 @@ def get_local_model_metrics(X_train, X_test, y_train, y_test, pipeline_ml) -> di
     print("\nCalculando metricas del modelo local (mejor_modelo.pkl)...")
     model = joblib.load(MODEL_PATH)
 
-    # Fitear pipeline_ml con X_train y transformar ambos conjuntos
-    X_train_t = pipeline_ml.fit_transform(X_train, y_train)
-    X_test_t  = pipeline_ml.transform(X_test)
-
-    y_pred = model.predict(X_test_t)
-    y_prob = model.predict_proba(X_test_t)[:, 1]
+    # mejor_modelo.pkl ya incluye pipeline_ml internamente
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
 
     metrics = {
         "accuracy":  round(accuracy_score(y_test, y_pred), 4),
