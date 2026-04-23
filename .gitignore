@@ -55,3 +55,6 @@ desktop.ini
 gcp_credentials.json
 *.json.key
 service_account*.json
+
+# Docker
+docker-compose.yml
