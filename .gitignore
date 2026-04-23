@@ -59,3 +59,13 @@ service_account*.json
 # Docker
 docker-compose.yml
 Dockerfile.jenkins
+
+# Outputs locales
+comparison_bar.png
+comparison_radar.png
+stability_boxplot.png
+credit_risk_pipeline.json
+
+# Directorios externos
+.claude/
+credit-risk-mlops/
