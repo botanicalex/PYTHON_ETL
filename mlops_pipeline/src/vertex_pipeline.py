@@ -10,7 +10,8 @@ BUCKET           = "credit-risk-mlops-alex-data"
 BQ_TABLE         = "credit-risk-mlops-alex.credit_risk_dataset_east.creditos_raw"
 TARGET           = "Pago_atiempo"
 PIPELINE_NAME    = "credit-risk-pipeline"
-CREDENTIALS_PATH = "gcp_credentials.json"
+_ROOT            = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CREDENTIALS_PATH = os.path.join(_ROOT, "gcp_credentials.json")
 SERVICE_ACCOUNT  = "credit-risk-sa@credit-risk-mlops-alex.iam.gserviceaccount.com"
 
 COLS_DROP = [
@@ -204,7 +205,7 @@ def credit_risk_pipeline(
 # Compilar y enviar a Vertex AI
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    PIPELINE_FILE = "credit_risk_pipeline.json"
+    PIPELINE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "credit_risk_pipeline.json")
 
     print("=" * 55)
     print("   VERTEX AI PIPELINE — vertex_pipeline.py")

@@ -12,8 +12,9 @@ from sklearn.metrics import (
 
 warnings.filterwarnings("ignore")
 
-SRC_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mlops_pipeline", "src")
-MODEL_PATH = os.path.join("mlops_pipeline", "src", "mejor_modelo.pkl")
+_HERE      = os.path.dirname(os.path.abspath(__file__))
+SRC_PATH   = _HERE
+MODEL_PATH = os.path.join(_HERE, "mejor_modelo.pkl")
 TARGET     = "Pago_atiempo"
 N_FOLDS    = 5
 STD_THRESHOLD = 0.05

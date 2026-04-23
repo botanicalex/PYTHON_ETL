@@ -19,9 +19,11 @@ warnings.filterwarnings("ignore")
 GCP_PROJECT      = "credit-risk-mlops-alex"
 GCP_REGION       = "us-east1"
 AUTOML_MODEL_NAME = "credit-risk-dataset-east"
-CREDENTIALS_PATH = "gcp_credentials.json"
-MODEL_PATH       = os.path.join("mlops_pipeline", "src", "mejor_modelo.pkl")
-SRC_PATH         = os.path.join(os.path.dirname(__file__), "mlops_pipeline", "src")
+_ROOT            = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HERE            = os.path.dirname(os.path.abspath(__file__))
+CREDENTIALS_PATH = os.path.join(_ROOT, "gcp_credentials.json")
+MODEL_PATH       = os.path.join(_HERE, "mejor_modelo.pkl")
+SRC_PATH         = _HERE
 
 METRICS_NAMES = ["accuracy", "f1_score", "roc_auc", "recall", "precision"]
 

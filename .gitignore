@@ -58,3 +58,4 @@ service_account*.json
 
 # Docker
 docker-compose.yml
+Dockerfile.jenkins
